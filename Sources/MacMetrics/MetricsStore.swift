@@ -13,6 +13,7 @@ final class MetricsStore: ObservableObject {
     private var previousCPU = host_cpu_load_info()
     private var hasCPUBaseline = false
     private var previousProcesses: [Int32: (cpuNanoseconds: UInt64, footprint: UInt64)] = [:]
+    private var processIcons: [Int32: NSImage?] = [:]
     private var previousProcessSample = Date()
     private let activeCores = max(1, ProcessInfo.processInfo.activeProcessorCount)
 
@@ -80,6 +81,8 @@ final class MetricsStore: ObservableObject {
         let now = Date()
         let elapsed = max(0.1, now.timeIntervalSince(previousProcessSample))
         let current = readProcesses()
+        let currentPIDs = Set(current.map(\.pid))
+        processIcons = processIcons.filter { currentPIDs.contains($0.key) }
         let ranked: [(pid: Int32, name: String, value: Double, detail: String)]
 
         if metric == .cpu {
@@ -104,7 +107,7 @@ final class MetricsStore: ObservableObject {
                 name: process.name,
                 value: process.value,
                 detail: process.detail,
-                icon: NSRunningApplication(processIdentifier: process.pid)?.icon
+                icon: processIcon(for: process.pid)
             )
         }
 
@@ -113,6 +116,34 @@ final class MetricsStore: ObservableObject {
         })
         previousProcessSample = now
         snapshot.processUsage[metric] = usage
+    }
+
+    private func processIcon(for pid: Int32) -> NSImage? {
+        if let cachedIcon = processIcons[pid] { return cachedIcon }
+        if processIcons.keys.contains(pid) { return nil }
+
+        let applicationIcon = NSRunningApplication(processIdentifier: pid)?.icon
+        let icon = applicationIcon ?? processApplicationBundlePath(for: pid).map {
+            NSWorkspace.shared.icon(forFile: $0)
+        }
+        processIcons[pid] = icon
+        return icon
+    }
+
+    private func processApplicationBundlePath(for pid: Int32) -> String? {
+        var pathBuffer = [CChar](repeating: 0, count: 4_096)
+        let pathLength = proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count))
+        guard pathLength > 0 else { return nil }
+        let executablePath = String(decoding: pathBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+
+        var directory = (executablePath as NSString).deletingLastPathComponent
+        while !directory.isEmpty, directory != "/" {
+            if directory.hasSuffix(".app") { return directory }
+            let parent = (directory as NSString).deletingLastPathComponent
+            guard parent != directory else { break }
+            directory = parent
+        }
+        return nil
     }
 
     private func refresh() {

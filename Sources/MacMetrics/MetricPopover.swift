@@ -6,7 +6,7 @@ struct MetricPopover: View {
     let openSettings: () -> Void
     @State private var processToQuit: ProcessUsage?
     @State private var showTerminationFailure = false
-    @State private var hoveredQuitProcess: Int32?
+    @State private var hoveredProcess: Int32?
 
     private var value: Double {
         switch metric {
@@ -128,7 +128,7 @@ struct MetricPopover: View {
     }
 
     private func processRow(_ process: ProcessUsage, rank: Int) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             Text("\(rank)")
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundStyle(.tertiary)
@@ -141,24 +141,31 @@ struct MetricPopover: View {
                     .frame(width: 18, height: 18)
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             } else {
-                Image(systemName: "app")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(.tertiary)
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(0.08))
                     .frame(width: 18, height: 18)
+                    .overlay {
+                        Image(systemName: "app.fill")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(process.name)
                     .font(.system(size: 13, weight: .regular))
                     .lineLimit(1)
+                    .truncationMode(.middle)
                 Text("PID \(process.pid)")
                     .font(.system(size: 10, weight: .regular, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
+            .layoutPriority(1)
             Spacer(minLength: 4)
             Text(process.detail)
                 .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()
                 .lineLimit(1)
+                .frame(width: metric == .memory ? 64 : 42, alignment: .trailing)
             if metric == .memory {
                 Text(String(format: "%.1f%%", process.value))
                     .font(.system(size: 11))
@@ -169,18 +176,25 @@ struct MetricPopover: View {
             Button {
                 processToQuit = process
             } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .medium))
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13, weight: .regular))
                     .frame(width: 18, height: 20)
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .foregroundStyle(hoveredQuitProcess == process.pid ? Color.red : Color.secondary.opacity(0.55))
-            .onHover { hoveredQuitProcess = $0 ? process.pid : nil }
+            .foregroundStyle(hoveredProcess == process.pid ? Color.red : Color.secondary.opacity(0.55))
+            .opacity(hoveredProcess == process.pid ? 1 : 0)
             .help("Force Quit \(process.name)")
             .accessibilityLabel("Force Quit \(process.name)")
         }
+        .padding(.horizontal, 4)
         .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color.primary.opacity(hoveredProcess == process.pid ? 0.045 : 0))
+        }
+        .contentShape(Rectangle())
+        .onHover { hoveredProcess = $0 ? process.pid : nil }
     }
 }
 
