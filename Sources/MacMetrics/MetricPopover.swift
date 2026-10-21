@@ -31,7 +31,6 @@ struct MetricPopover: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            .padding(.horizontal, 2)
             .padding(.top, 2)
 
             if metric == .gpu {
@@ -39,15 +38,20 @@ struct MetricPopover: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 2)
                     .padding(.vertical, 8)
             } else {
                 processList
             }
         }
-        .padding(12)
-        .frame(width: 340, height: metric == .gpu ? 250 : 410, alignment: .topLeading)
-        .background(Color.clear)
+        .padding(14)
+        .frame(width: 340, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .confirmationDialog(
             "Force quit \(processToQuit?.name ?? "process")?",
             isPresented: Binding(get: { processToQuit != nil }, set: { if !$0 { processToQuit = nil } }),

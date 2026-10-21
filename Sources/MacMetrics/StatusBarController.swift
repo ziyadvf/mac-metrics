@@ -2,10 +2,11 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class StatusBarController: NSObject, NSPopoverDelegate {
+final class StatusBarController: NSObject {
     private let store = MetricsStore()
     private var items: [Metric: NSStatusItem] = [:]
-    private var popovers: [Metric: NSPopover] = [:]
+    private var panels: [Metric: NSPanel] = [:]
+    private var hostingControllers: [Metric: NSHostingController<MetricPopover>] = [:]
     private var refreshTimer: Timer?
     private var localClickMonitor: Any?
     private var globalClickMonitor: Any?
@@ -19,12 +20,25 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             item.button?.tag = Metric.allCases.firstIndex(of: metric) ?? 0
             items[metric] = item
 
-            let popover = NSPopover()
-            popover.behavior = .transient
-            popover.delegate = self
-            popover.contentSize = NSSize(width: 340, height: metric == .gpu ? 250 : 410)
-            popover.contentViewController = NSHostingController(rootView: MetricPopover(metric: metric, store: store))
-            popovers[metric] = popover
+            let hostingController = NSHostingController(rootView: MetricPopover(metric: metric, store: store))
+            let panel = NSPanel(
+                contentRect: .zero,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.contentViewController = hostingController
+            panel.isFloatingPanel = true
+            panel.isReleasedWhenClosed = false
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = true
+            panel.level = .statusBar
+            panel.hidesOnDeactivate = true
+            panel.animationBehavior = .none
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+            panels[metric] = panel
+            hostingControllers[metric] = hostingController
         }
         refreshLabels()
         installOutsideClickMonitors()
@@ -62,17 +76,16 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     }
 
     private func closePopoversIfOutside(_ point: NSPoint) {
-        guard popovers.values.contains(where: \.isShown) else { return }
+        guard panels.values.contains(where: \.isVisible) else { return }
         let clickedStatusButton = items.values.contains { item in
             guard let button = item.button, let window = button.window else { return false }
             return window.convertToScreen(button.convert(button.bounds, to: nil)).contains(point)
         }
         if clickedStatusButton { return }
 
-        for (metric, popover) in popovers where popover.isShown {
-            let clickedInsidePopover = popover.contentViewController?.view.window?.frame.contains(point) ?? false
-            if !clickedInsidePopover {
-                popover.performClose(nil)
+        for (metric, panel) in panels where panel.isVisible {
+            if !panel.frame.contains(point) {
+                panel.orderOut(nil)
                 store.hide(metric)
             }
         }
@@ -81,24 +94,31 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
         guard let metric = Metric.allCases[safe: sender.tag],
               let item = items[metric], let button = item.button,
-              let popover = popovers[metric] else { return }
-        for (otherMetric, otherPopover) in popovers where otherMetric != metric && otherPopover.isShown {
-            otherPopover.performClose(nil)
+              let panel = panels[metric], let hostingController = hostingControllers[metric] else { return }
+        for (otherMetric, otherPanel) in panels where otherMetric != metric && otherPanel.isVisible {
+            otherPanel.orderOut(nil)
             store.hide(otherMetric)
         }
-        if popover.isShown {
-            popover.performClose(nil)
+        if panel.isVisible {
+            panel.orderOut(nil)
             store.hide(metric)
         } else {
             store.show(metric)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            hostingController.view.layoutSubtreeIfNeeded()
+            let size = hostingController.view.fittingSize
+            panel.setContentSize(NSSize(width: max(320, size.width), height: size.height))
+            position(panel, below: button)
+            panel.orderFrontRegardless()
         }
     }
 
-    func popoverDidClose(_ notification: Notification) {
-        guard let closedPopover = notification.object as? NSPopover,
-              let metric = popovers.first(where: { $0.value === closedPopover })?.key else { return }
-        store.hide(metric)
+    private func position(_ panel: NSPanel, below button: NSStatusBarButton) {
+        guard let window = button.window else { return }
+        let anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
+        let screen = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let x = min(max(anchor.midX - panel.frame.width / 2, screen.minX + 8), screen.maxX - panel.frame.width - 8)
+        let y = max(anchor.minY - panel.frame.height - 4, screen.minY + 8)
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 }
 
