@@ -7,6 +7,8 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     private var items: [Metric: NSStatusItem] = [:]
     private var popovers: [Metric: NSPopover] = [:]
     private var refreshTimer: Timer?
+    private var localClickMonitor: Any?
+    private var globalClickMonitor: Any?
 
     override init() {
         super.init()
@@ -20,11 +22,12 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             let popover = NSPopover()
             popover.behavior = .transient
             popover.delegate = self
-            popover.contentSize = NSSize(width: 360, height: 380)
+            popover.contentSize = NSSize(width: 340, height: metric == .gpu ? 250 : 410)
             popover.contentViewController = NSHostingController(rootView: MetricPopover(metric: metric, store: store))
             popovers[metric] = popover
         }
         refreshLabels()
+        installOutsideClickMonitors()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshLabels() }
         }
@@ -44,10 +47,45 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         items[metric]?.button?.attributedTitle = NSAttributedString(string: title, attributes: [.font: font])
     }
 
+    private func installOutsideClickMonitors() {
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self else { return event }
+            self.closePopoversIfOutside(NSEvent.mouseLocation)
+            return event
+        }
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.closePopoversIfOutside(NSEvent.mouseLocation)
+            }
+        }
+    }
+
+    private func closePopoversIfOutside(_ point: NSPoint) {
+        guard popovers.values.contains(where: \.isShown) else { return }
+        let clickedStatusButton = items.values.contains { item in
+            guard let button = item.button, let window = button.window else { return false }
+            return window.convertToScreen(button.convert(button.bounds, to: nil)).contains(point)
+        }
+        if clickedStatusButton { return }
+
+        for (metric, popover) in popovers where popover.isShown {
+            let clickedInsidePopover = popover.contentViewController?.view.window?.frame.contains(point) ?? false
+            if !clickedInsidePopover {
+                popover.performClose(nil)
+                store.hide(metric)
+            }
+        }
+    }
+
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
         guard let metric = Metric.allCases[safe: sender.tag],
               let item = items[metric], let button = item.button,
               let popover = popovers[metric] else { return }
+        for (otherMetric, otherPopover) in popovers where otherMetric != metric && otherPopover.isShown {
+            otherPopover.performClose(nil)
+            store.hide(otherMetric)
+        }
         if popover.isShown {
             popover.performClose(nil)
             store.hide(metric)
