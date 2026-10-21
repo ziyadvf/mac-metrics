@@ -71,13 +71,14 @@ final class SettingsWindowController {
             window = existing
         } else {
             let created = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 430, height: 390),
+                contentRect: NSRect(x: 0, y: 0, width: 460, height: 390),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false
             )
             created.title = "Mac Metrics Settings"
             created.isReleasedWhenClosed = false
+            created.contentMinSize = NSSize(width: 460, height: 390)
             created.contentViewController = NSHostingController(rootView: SettingsView(preferences: preferences))
             self.window = created
             window = created
@@ -126,6 +127,6 @@ private struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding(16)
-        .frame(width: 430)
+        .frame(width: 460, height: 390, alignment: .topLeading)
     }
 }

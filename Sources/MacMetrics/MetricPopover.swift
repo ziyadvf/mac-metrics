@@ -133,6 +133,19 @@ struct MetricPopover: View {
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundStyle(.tertiary)
                 .frame(width: 12, alignment: .leading)
+            if let icon = process.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            } else {
+                Image(systemName: "app")
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 18, height: 18)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(process.name)
                     .font(.system(size: 13, weight: .regular))

@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 enum Metric: String, CaseIterable, Identifiable {
     case cpu = "CPU"
@@ -29,6 +30,7 @@ struct ProcessUsage: Identifiable {
     let name: String
     let value: Double
     let detail: String
+    let icon: NSImage?
     var id: Int32 { pid }
 }
 

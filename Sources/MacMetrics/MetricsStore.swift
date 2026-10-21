@@ -80,24 +80,32 @@ final class MetricsStore: ObservableObject {
         let now = Date()
         let elapsed = max(0.1, now.timeIntervalSince(previousProcessSample))
         let current = readProcesses()
-        let usage: [ProcessUsage]
+        let ranked: [(pid: Int32, name: String, value: Double, detail: String)]
 
         if metric == .cpu {
-            usage = current.compactMap { process in
+            ranked = current.compactMap { process in
                 guard let prior = previousProcesses[process.pid] else { return nil }
                 let delta = process.cpuNanoseconds >= prior.cpuNanoseconds
                     ? process.cpuNanoseconds - prior.cpuNanoseconds : 0
                 let percent = Double(delta) / (elapsed * 1_000_000_000 * Double(activeCores)) * 100
-                return ProcessUsage(pid: process.pid, name: process.name, value: percent,
-                                    detail: String(format: "%.1f%%", percent))
-            }.sorted { $0.value > $1.value }.prefix(5).map { $0 }
+                return (process.pid, process.name, percent, String(format: "%.1f%%", percent))
+            }.sorted { $0.value > $1.value }
         } else {
             let total = max(1, snapshot.memoryTotal)
-            usage = current.map { process in
+            ranked = current.map { process in
                 let percent = Double(process.footprint) / Double(total) * 100
-                return ProcessUsage(pid: process.pid, name: process.name, value: percent,
-                                    detail: Self.formatBytes(process.footprint))
-            }.sorted { $0.value > $1.value }.prefix(5).map { $0 }
+                return (process.pid, process.name, percent, Self.formatBytes(process.footprint))
+            }.sorted { $0.value > $1.value }
+        }
+
+        let usage = ranked.prefix(5).map { process in
+            ProcessUsage(
+                pid: process.pid,
+                name: process.name,
+                value: process.value,
+                detail: process.detail,
+                icon: NSRunningApplication(processIdentifier: process.pid)?.icon
+            )
         }
 
         previousProcesses = Dictionary(uniqueKeysWithValues: current.map {
