@@ -14,56 +14,39 @@ struct MetricPopover: View {
         }
     }
 
+    private var hasValue: Bool { metric != .gpu || store.snapshot.gpuPercent != nil }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Label(metric.rawValue, systemImage: metric.symbol)
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
-                    Text(metric == .gpu && store.snapshot.gpuPercent == nil ? "Unavailable" : String(format: "%.0f%%", value))
-                        .font(.system(size: 34, weight: .semibold, design: .rounded)).contentTransition(.numericText())
+        VStack(alignment: .leading, spacing: 9) {
+            summaryCard
+
+            HStack(alignment: .firstTextBaseline) {
+                Text(metric == .gpu ? "GPU activity" : metric == .cpu ? "Top CPU processes" : "Memory use")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                if metric != .gpu {
+                    Text("TOP FIVE")
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer()
             }
-
-            if metric == .memory {
-                Text("\(MetricsStore.formatBytes(store.snapshot.memoryUsed)) of \(MetricsStore.formatBytes(store.snapshot.memoryTotal))")
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-                ProgressView(value: value, total: 100).tint(tint)
-            } else {
-                ProgressView(value: metric == .gpu && store.snapshot.gpuPercent == nil ? 0 : value, total: 100)
-                    .tint(tint)
-            }
-
-            HStack {
-                Text(metric == .cpu ? "Processes" : metric == .gpu ? "GPU activity" : "Memory use")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                if metric != .gpu { Text("Top five").font(.system(size: 11)).foregroundStyle(.secondary) }
-            }
-            .padding(.top, 1)
+            .padding(.horizontal, 2)
+            .padding(.top, 2)
 
             if metric == .gpu {
-                ContentUnavailableView("Per-process GPU data", systemImage: "gpu",
-                                       description: Text("macOS does not provide a stable public API for ranking apps by GPU use. Aggregate GPU utilization appears above when the Mac exposes it."))
-                    .font(.system(size: 12))
+                Text("macOS doesn’t expose per-process GPU usage through a stable public API.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 8)
             } else {
-                let processes = store.snapshot.processUsage[metric] ?? []
-                if processes.isEmpty {
-                    Text(metric == .cpu ? "Gathering a second sample…" : "No process data available")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 80)
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(processes.enumerated()), id: \.element.id) { index, process in
-                            processRow(process, rank: index + 1)
-                            if index != processes.count - 1 { Divider().padding(.leading, 30) }
-                        }
-                    }
-                }
+                processList
             }
         }
-        .padding(16)
-        .frame(width: 360, height: 380, alignment: .topLeading)
+        .padding(12)
+        .frame(width: 340, height: metric == .gpu ? 250 : 410, alignment: .topLeading)
         .background(Color.clear)
         .confirmationDialog(
             "Force quit \(processToQuit?.name ?? "process")?",
@@ -86,6 +69,86 @@ struct MetricPopover: View {
         }
     }
 
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: metric.symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(metric.rawValue)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(summaryCaption)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                Text(hasValue ? String(format: "%.0f%%", value) : "—")
+                    .font(.system(size: 36, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Spacer(minLength: 0)
+                Text(summaryDetail)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+            }
+
+            ProgressView(value: hasValue ? value : 0, total: 100)
+                .tint(tint)
+                .opacity(hasValue ? 1 : 0.35)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .background {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(Color.primary.opacity(0.075))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.045), lineWidth: 1)
+        }
+    }
+
+    private var processList: some View {
+        let processes = store.snapshot.processUsage[metric] ?? []
+        return VStack(spacing: 0) {
+            if processes.isEmpty {
+                Text(metric == .cpu ? "Gathering a second sample…" : "No process data available")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 45, alignment: .leading)
+            } else {
+                ForEach(Array(processes.enumerated()), id: \.element.id) { index, process in
+                    processRow(process, rank: index + 1)
+                    if index != processes.count - 1 {
+                        Divider().padding(.leading, 22)
+                    }
+                }
+            }
+        }
+    }
+
+    private var summaryCaption: String {
+        switch metric {
+        case .cpu: "TOTAL LOAD"
+        case .gpu: "TOTAL ACTIVITY"
+        case .memory: "MEMORY PRESSURE"
+        }
+    }
+
+    private var summaryDetail: String {
+        switch metric {
+        case .cpu: "System-wide"
+        case .gpu: hasValue ? "System-wide" : "Unavailable"
+        case .memory:
+            "\(MetricsStore.formatBytes(store.snapshot.memoryUsed)) of \(MetricsStore.formatBytes(store.snapshot.memoryTotal))"
+        }
+    }
+
     private var tint: Color {
         switch metric {
         case .cpu: .cyan
@@ -95,24 +158,37 @@ struct MetricPopover: View {
     }
 
     private func processRow(_ process: ProcessUsage, rank: Int) -> some View {
-        HStack(spacing: 11) {
-            Text("\(rank)").font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).frame(width: 12)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(process.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                Text("PID \(process.pid)").font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
+        HStack(spacing: 8) {
+            Text("\(rank)")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .frame(width: 12, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(process.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text("PID \(process.pid)")
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 6)
-            if metric == .cpu {
-                Text(process.detail).font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
-            } else {
-                Text(process.detail).font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
-                Text(String(format: "%.1f%%", process.value)).font(.system(size: 9)).foregroundStyle(.secondary).frame(width: 42, alignment: .trailing)
+            Spacer(minLength: 4)
+            Text(process.detail)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+            if metric == .memory {
+                Text(String(format: "%.1f%%", process.value))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(width: 37, alignment: .trailing)
             }
             Button {
                 processToQuit = process
             } label: {
-                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
-                    .frame(width: 20, height: 20)
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: 18, height: 20)
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -120,6 +196,6 @@ struct MetricPopover: View {
             .help("Force Quit \(process.name)")
             .accessibilityLabel("Force Quit \(process.name)")
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 4)
     }
 }
