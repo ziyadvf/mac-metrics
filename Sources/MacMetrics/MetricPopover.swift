@@ -5,6 +5,7 @@ struct MetricPopover: View {
     @ObservedObject var store: MetricsStore
     @State private var processToQuit: ProcessUsage?
     @State private var showTerminationFailure = false
+    @State private var hoveredQuitProcess: Int32?
 
     private var value: Double {
         switch metric {
@@ -17,25 +18,20 @@ struct MetricPopover: View {
     private var hasValue: Bool { metric != .gpu || store.snapshot.gpuPercent != nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
             summaryCard
 
             HStack(alignment: .firstTextBaseline) {
-                Text(metric == .gpu ? "GPU activity" : metric == .cpu ? "Top CPU processes" : "Memory use")
-                    .font(.system(size: 12, weight: .semibold))
+                Text(metric == .gpu ? "GPU activity" : metric == .cpu ? "CPU processes" : "Memory use")
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                if metric != .gpu {
-                    Text("TOP FIVE")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(0.5)
-                        .foregroundStyle(.tertiary)
-                }
+                if metric != .gpu { Text("Top 5").font(.system(size: 11)).foregroundStyle(.secondary) }
             }
             .padding(.top, 2)
 
             if metric == .gpu {
-                Text("macOS doesn’t expose per-process GPU usage through a stable public API.")
-                    .font(.system(size: 11))
+                Text("Per-process GPU usage isn’t available in macOS.")
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.vertical, 8)
@@ -47,6 +43,7 @@ struct MetricPopover: View {
         .frame(width: 340, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .modifier(MenuBarGlassSurface())
+        .transaction { $0.animation = nil }
         .confirmationDialog(
             "Force quit \(processToQuit?.name ?? "process")?",
             isPresented: Binding(get: { processToQuit != nil }, set: { if !$0 { processToQuit = nil } }),
@@ -72,25 +69,23 @@ struct MetricPopover: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 Image(systemName: metric.symbol)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(tint)
                 Text(metric.rawValue)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 8)
                 Text(summaryCaption)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
 
             HStack(alignment: .lastTextBaseline, spacing: 8) {
                 Text(hasValue ? String(format: "%.0f%%", value) : "—")
-                    .font(.system(size: 36, weight: .semibold, design: .rounded))
+                    .font(.system(size: 36, weight: .medium, design: .rounded))
                     .monospacedDigit()
-                    .contentTransition(.numericText())
                 Spacer(minLength: 0)
                 Text(summaryDetail)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
                     .lineLimit(2)
@@ -100,15 +95,11 @@ struct MetricPopover: View {
                 .tint(tint)
                 .opacity(hasValue ? 1 : 0.35)
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 11)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background {
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .fill(Color.primary.opacity(0.075))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.045), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.055))
         }
     }
 
@@ -116,10 +107,13 @@ struct MetricPopover: View {
         let processes = store.snapshot.processUsage[metric] ?? []
         return VStack(spacing: 0) {
             if processes.isEmpty {
-                Text(metric == .cpu ? "Gathering a second sample…" : "No process data available")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 45, alignment: .leading)
+                HStack(spacing: 8) {
+                    if metric == .cpu { ProgressView().controlSize(.small) }
+                    Text(metric == .cpu ? "Measuring CPU usage…" : "No process data available")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             } else {
                 ForEach(Array(processes.enumerated()), id: \.element.id) { index, process in
                     processRow(process, rank: index + 1)
@@ -133,16 +127,15 @@ struct MetricPopover: View {
 
     private var summaryCaption: String {
         switch metric {
-        case .cpu: "TOTAL LOAD"
-        case .gpu: "TOTAL ACTIVITY"
-        case .memory: "MEMORY PRESSURE"
+        case .cpu, .gpu: "Total"
+        case .memory: "Physical memory"
         }
     }
 
     private var summaryDetail: String {
         switch metric {
-        case .cpu: "System-wide"
-        case .gpu: hasValue ? "System-wide" : "Unavailable"
+        case .cpu: ""
+        case .gpu: hasValue ? "" : "Unavailable"
         case .memory:
             "\(MetricsStore.formatBytes(store.snapshot.memoryUsed)) of \(MetricsStore.formatBytes(store.snapshot.memoryTotal))"
         }
@@ -150,34 +143,34 @@ struct MetricPopover: View {
 
     private var tint: Color {
         switch metric {
-        case .cpu: .cyan
+        case .cpu: .blue
         case .gpu: .purple
-        case .memory: .mint
+        case .memory: .green
         }
     }
 
     private func processRow(_ process: ProcessUsage, rank: Int) -> some View {
         HStack(spacing: 8) {
             Text("\(rank)")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundStyle(.tertiary)
                 .frame(width: 12, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
                 Text(process.name)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 13, weight: .regular))
                     .lineLimit(1)
                 Text("PID \(process.pid)")
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
             Text(process.detail)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()
                 .lineLimit(1)
             if metric == .memory {
                 Text(String(format: "%.1f%%", process.value))
-                    .font(.system(size: 9))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                     .frame(width: 37, alignment: .trailing)
@@ -186,16 +179,17 @@ struct MetricPopover: View {
                 processToQuit = process
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 10, weight: .medium))
                     .frame(width: 18, height: 20)
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(hoveredQuitProcess == process.pid ? Color.red : Color.secondary.opacity(0.55))
+            .onHover { hoveredQuitProcess = $0 ? process.pid : nil }
             .help("Force Quit \(process.name)")
             .accessibilityLabel("Force Quit \(process.name)")
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
     }
 }
 

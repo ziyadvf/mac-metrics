@@ -56,11 +56,25 @@ final class StatusBarController: NSObject {
         setLabel(.gpu, format: "G%3.0f%%", value: snapshot.gpuPercent ?? 0, font: font,
                  unavailable: snapshot.gpuPercent == nil)
         setLabel(.cpu, format: "C%3.0f%%", value: snapshot.cpuPercent, font: font)
+        resizeVisiblePanels()
     }
 
     private func setLabel(_ metric: Metric, format: String, value: Double, font: NSFont, unavailable: Bool = false) {
         let title = unavailable ? "G  —%" : String(format: format, value)
         items[metric]?.button?.attributedTitle = NSAttributedString(string: title, attributes: [.font: font])
+    }
+
+    private func resizeVisiblePanels() {
+        for (metric, panel) in panels where panel.isVisible {
+            guard let button = items[metric]?.button,
+                  let hostingController = hostingControllers[metric] else { continue }
+            hostingController.view.layoutSubtreeIfNeeded()
+            let measured = hostingController.sizeThatFits(in: NSSize(width: 340, height: 900))
+            let size = NSSize(width: 340, height: max(210, measured.height))
+            guard abs(panel.frame.height - size.height) > 1 else { continue }
+            panel.setContentSize(size)
+            position(panel, below: button)
+        }
     }
 
     private func installOutsideClickMonitors() {
