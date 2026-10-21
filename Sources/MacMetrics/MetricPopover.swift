@@ -46,12 +46,7 @@ struct MetricPopover: View {
         .padding(14)
         .frame(width: 340, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .modifier(MenuBarGlassSurface())
         .confirmationDialog(
             "Force quit \(processToQuit?.name ?? "process")?",
             isPresented: Binding(get: { processToQuit != nil }, set: { if !$0 { processToQuit = nil } }),
@@ -201,5 +196,23 @@ struct MetricPopover: View {
             .accessibilityLabel("Force Quit \(process.name)")
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct MenuBarGlassSurface: ViewModifier {
+    private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: shape)
+        } else {
+            content
+                .background(.regularMaterial, in: shape)
+                .overlay {
+                    shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+                .clipShape(shape)
+        }
     }
 }
