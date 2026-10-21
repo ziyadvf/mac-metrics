@@ -71,14 +71,14 @@ final class SettingsWindowController {
             window = existing
         } else {
             let created = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 460, height: 390),
+                contentRect: NSRect(x: 0, y: 0, width: 420, height: 310),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false
             )
-            created.title = "Mac Metrics Settings"
+            created.title = "Settings"
             created.isReleasedWhenClosed = false
-            created.contentMinSize = NSSize(width: 460, height: 390)
+            created.contentMinSize = NSSize(width: 420, height: 310)
             created.contentViewController = NSHostingController(rootView: SettingsView(preferences: preferences))
             self.window = created
             window = created
@@ -98,35 +98,49 @@ private struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section("General") {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
                 Toggle("Open at login", isOn: launchAtLoginBinding)
                 if preferences.launchAtLoginStatus == .requiresApproval {
                     Text("Allow Mac Metrics in System Settings → General → Login Items.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let error = preferences.launchAtLoginError {
-                    Text(error).font(.footnote).foregroundStyle(.red)
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            Section("Menu Bar") {
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Menu Bar")
+                    .font(.headline)
                 Toggle("CPU", isOn: $preferences.showsCPU)
                 Toggle("GPU", isOn: $preferences.showsGPU)
                 Toggle("RAM", isOn: $preferences.showsRAM)
             }
 
-            Section("Updates") {
+            Divider()
+
+            HStack {
+                Text("Refresh interval")
+                Spacer()
                 Picker("Refresh interval", selection: $preferences.refreshInterval) {
                     Text("1 second").tag(1.0)
                     Text("2 seconds").tag(2.0)
                     Text("5 seconds").tag(5.0)
                 }
+                .labelsHidden()
+                .fixedSize()
             }
         }
-        .formStyle(.grouped)
-        .padding(16)
-        .frame(width: 460, height: 390, alignment: .topLeading)
+        .toggleStyle(.switch)
+        .padding(22)
+        .frame(width: 420, height: 310, alignment: .topLeading)
     }
 }
