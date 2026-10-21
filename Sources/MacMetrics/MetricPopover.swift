@@ -19,7 +19,7 @@ struct MetricPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            summaryCard
+            metricSummary
 
             HStack(alignment: .firstTextBaseline) {
                 Text(metric == .gpu ? "GPU activity" : metric == .cpu ? "CPU processes" : "Memory use")
@@ -65,41 +65,24 @@ struct MetricPopover: View {
         }
     }
 
-    private var summaryCard: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Image(systemName: metric.symbol)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(tint)
-                Text(metric.rawValue)
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer(minLength: 8)
-                Text(summaryCaption)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-
+    private var metricSummary: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(metric.rawValue)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
             HStack(alignment: .lastTextBaseline, spacing: 8) {
                 Text(hasValue ? String(format: "%.0f%%", value) : "—")
                     .font(.system(size: 36, weight: .medium, design: .rounded))
                     .monospacedDigit()
                 Spacer(minLength: 0)
-                Text(summaryDetail)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(2)
+                if !summaryDetail.isEmpty {
+                    Text(summaryDetail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
+                }
             }
-
-            ProgressView(value: hasValue ? value : 0, total: 100)
-                .tint(tint)
-                .opacity(hasValue ? 1 : 0.35)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.055))
         }
     }
 
@@ -125,27 +108,12 @@ struct MetricPopover: View {
         }
     }
 
-    private var summaryCaption: String {
-        switch metric {
-        case .cpu, .gpu: "Total"
-        case .memory: "Physical memory"
-        }
-    }
-
     private var summaryDetail: String {
         switch metric {
         case .cpu: ""
         case .gpu: hasValue ? "" : "Unavailable"
         case .memory:
             "\(MetricsStore.formatBytes(store.snapshot.memoryUsed)) of \(MetricsStore.formatBytes(store.snapshot.memoryTotal))"
-        }
-    }
-
-    private var tint: Color {
-        switch metric {
-        case .cpu: .blue
-        case .gpu: .purple
-        case .memory: .green
         }
     }
 
