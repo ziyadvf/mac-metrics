@@ -9,15 +9,28 @@ final class MetricsStore: ObservableObject {
     @Published private(set) var terminationFailure: String?
 
     private var timer: Timer?
+    private var refreshInterval: TimeInterval
     private var previousCPU = host_cpu_load_info()
     private var hasCPUBaseline = false
     private var previousProcesses: [Int32: (cpuNanoseconds: UInt64, footprint: UInt64)] = [:]
     private var previousProcessSample = Date()
     private let activeCores = max(1, ProcessInfo.processInfo.activeProcessorCount)
 
-    init() {
+    init(refreshInterval: TimeInterval = 2) {
+        self.refreshInterval = refreshInterval
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        scheduleRefreshTimer()
+    }
+
+    func setRefreshInterval(_ interval: TimeInterval) {
+        guard refreshInterval != interval else { return }
+        refreshInterval = interval
+        timer?.invalidate()
+        scheduleRefreshTimer()
+    }
+
+    private func scheduleRefreshTimer() {
+        timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
     }

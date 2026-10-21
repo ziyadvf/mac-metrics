@@ -14,9 +14,12 @@ struct MacMetricsApp {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusController: StatusBarController?
+    private var preferences: AppPreferences?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        statusController = StatusBarController()
+        let preferences = AppPreferences()
+        self.preferences = preferences
+        statusController = StatusBarController(preferences: preferences)
     }
 }

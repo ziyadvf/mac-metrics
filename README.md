@@ -9,7 +9,8 @@ A small, native macOS menu bar monitor focused on CPU, GPU, and RAM.
 - Click RAM to see the five processes using the most physical memory.
 - Force quit a process from either list after confirming the action; macOS may prevent quitting protected processes.
 - Click GPU for the available aggregate GPU reading and its process-visibility note.
-- Samples lightweight system totals every two seconds; process rankings are read only while a popover is open.
+- Open Settings from the bottom of a metric panel to control launch at login, visible menu bar metrics, and the refresh interval.
+- Samples lightweight system totals at the selected interval; process rankings are read only while a metric panel is open.
 - Uses Swift, AppKit, SwiftUI, and system frameworks only. No analytics, network access, or third-party dependencies.
 - Uses native Liquid Glass on macOS 26 and newer, with a system material fallback on macOS 14 and 15.
 
@@ -28,7 +29,9 @@ Scripts/build.sh
 open dist/MacMetrics.app
 ```
 
-To install for the current user, run `Scripts/install.sh`. It copies the app into `~/Applications` and launches it. The app is an ad-hoc signed local build until you sign it with your own Apple Developer ID. Launch at login is intentionally not enabled by default.
+To install for the current user, run `Scripts/install.sh`. It copies the app into `~/Applications` and launches it. The app is an ad-hoc signed local build until you sign it with your own Apple Developer ID. Launch at login is off by default and can be enabled in Settings.
+
+The app icon is included in `Resources/AppIcon.icns`. To regenerate it after changing the vector artwork, run `Scripts/generate-icon.sh`.
 
 ## Footprint choices
 

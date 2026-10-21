@@ -1,17 +1,24 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
 final class StatusBarController: NSObject {
-    private let store = MetricsStore()
+    private let preferences: AppPreferences
+    private let store: MetricsStore
+    private let settingsWindow: SettingsWindowController
     private var items: [Metric: NSStatusItem] = [:]
     private var panels: [Metric: NSPanel] = [:]
     private var hostingControllers: [Metric: NSHostingController<MetricPopover>] = [:]
     private var refreshTimer: Timer?
+    private var subscriptions = Set<AnyCancellable>()
     private var localClickMonitor: Any?
     private var globalClickMonitor: Any?
 
-    override init() {
+    init(preferences: AppPreferences) {
+        self.preferences = preferences
+        self.store = MetricsStore(refreshInterval: preferences.refreshInterval)
+        self.settingsWindow = SettingsWindowController(preferences: preferences)
         super.init()
         for metric in Metric.allCases {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -20,7 +27,11 @@ final class StatusBarController: NSObject {
             item.button?.tag = Metric.allCases.firstIndex(of: metric) ?? 0
             items[metric] = item
 
-            let hostingController = NSHostingController(rootView: MetricPopover(metric: metric, store: store))
+            let hostingController = NSHostingController(rootView: MetricPopover(
+                metric: metric,
+                store: store,
+                openSettings: { [weak self] in self?.showSettings() }
+            ))
             let panel = NSPanel(
                 contentRect: .zero,
                 styleMask: [.borderless, .nonactivatingPanel],
@@ -42,11 +53,51 @@ final class StatusBarController: NSObject {
             panels[metric] = panel
             hostingControllers[metric] = hostingController
         }
+        bindPreferences()
+        applyMetricVisibility()
         refreshLabels()
         installOutsideClickMonitors()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        scheduleLabelRefresh()
+    }
+
+    private func bindPreferences() {
+        preferences.$showsCPU.sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
+        preferences.$showsGPU.sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
+        preferences.$showsRAM.sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
+        preferences.$refreshInterval.dropFirst().sink { [weak self] interval in
+            self?.store.setRefreshInterval(interval)
+            self?.scheduleLabelRefresh(interval: interval)
+        }.store(in: &subscriptions)
+    }
+
+    private func applyMetricVisibility() {
+        let visibility: [(Metric, Bool)] = [
+            (.cpu, preferences.showsCPU),
+            (.gpu, preferences.showsGPU),
+            (.memory, preferences.showsRAM)
+        ]
+        for (metric, visible) in visibility {
+            items[metric]?.isVisible = visible
+            if !visible, let panel = panels[metric], panel.isVisible {
+                panel.orderOut(nil)
+                store.hide(metric)
+            }
+        }
+    }
+
+    private func scheduleLabelRefresh(interval: TimeInterval? = nil) {
+        refreshTimer?.invalidate()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: interval ?? preferences.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshLabels() }
         }
+    }
+
+    private func showSettings() {
+        for (metric, panel) in panels where panel.isVisible {
+            panel.orderOut(nil)
+            store.hide(metric)
+        }
+        settingsWindow.show()
     }
 
     private func refreshLabels() {

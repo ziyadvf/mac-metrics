@@ -3,6 +3,7 @@ import SwiftUI
 struct MetricPopover: View {
     let metric: Metric
     @ObservedObject var store: MetricsStore
+    let openSettings: () -> Void
     @State private var processToQuit: ProcessUsage?
     @State private var showTerminationFailure = false
     @State private var hoveredQuitProcess: Int32?
@@ -38,6 +39,15 @@ struct MetricPopover: View {
             } else {
                 processList
             }
+
+            Divider().padding(.top, 2)
+            Button(action: openSettings) {
+                Label("Settings…", systemImage: "gearshape")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
         }
         .padding(14)
         .frame(width: 340, alignment: .topLeading)
