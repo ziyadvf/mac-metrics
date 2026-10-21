@@ -32,9 +32,16 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 
     private func refreshLabels() {
         let snapshot = store.snapshot
-        items[.memory]?.button?.title = String(format: "R%.0f%%", snapshot.memoryPercent)
-        items[.gpu]?.button?.title = snapshot.gpuPercent.map { String(format: "G%.0f%%", $0) } ?? "G—"
-        items[.cpu]?.button?.title = String(format: "C%.0f%%", snapshot.cpuPercent)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        setLabel(.memory, format: "R%3.0f%%", value: snapshot.memoryPercent, font: font)
+        setLabel(.gpu, format: "G%3.0f%%", value: snapshot.gpuPercent ?? 0, font: font,
+                 unavailable: snapshot.gpuPercent == nil)
+        setLabel(.cpu, format: "C%3.0f%%", value: snapshot.cpuPercent, font: font)
+    }
+
+    private func setLabel(_ metric: Metric, format: String, value: Double, font: NSFont, unavailable: Bool = false) {
+        let title = unavailable ? "G  —%" : String(format: format, value)
+        items[metric]?.button?.attributedTitle = NSAttributedString(string: title, attributes: [.font: font])
     }
 
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
