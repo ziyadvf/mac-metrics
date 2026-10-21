@@ -15,13 +15,13 @@ struct MetricPopover: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 11) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Label(metric.rawValue, systemImage: metric.symbol)
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
                     Text(metric == .gpu && store.snapshot.gpuPercent == nil ? "Unavailable" : String(format: "%.0f%%", value))
-                        .font(.system(size: 38, weight: .semibold, design: .rounded)).contentTransition(.numericText())
+                        .font(.system(size: 34, weight: .semibold, design: .rounded)).contentTransition(.numericText())
                 }
                 Spacer()
             }
@@ -61,10 +61,9 @@ struct MetricPopover: View {
                     }
                 }
             }
-            Spacer(minLength: 0)
         }
-        .padding(20)
-        .frame(width: 360, height: 420, alignment: .topLeading)
+        .padding(16)
+        .frame(width: 360, height: 380, alignment: .topLeading)
         .background(Color.clear)
         .confirmationDialog(
             "Force quit \(processToQuit?.name ?? "process")?",
@@ -112,13 +111,15 @@ struct MetricPopover: View {
             Button {
                 processToQuit = process
             } label: {
-                Image(systemName: "xmark.circle.fill").font(.system(size: 14))
+                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                    .frame(width: 20, height: 20)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
+            .focusable(false)
             .foregroundStyle(.secondary)
             .help("Force Quit \(process.name)")
             .accessibilityLabel("Force Quit \(process.name)")
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 5)
     }
 }
