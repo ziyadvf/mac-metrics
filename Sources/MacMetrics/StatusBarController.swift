@@ -34,7 +34,9 @@ final class StatusBarController: NSObject {
             panel.backgroundColor = .clear
             panel.hasShadow = true
             panel.level = .statusBar
-            panel.hidesOnDeactivate = true
+            // Status item clicks do not always activate an accessory app; keep the
+            // non-activating panel visible until the explicit outside-click monitor closes it.
+            panel.hidesOnDeactivate = false
             panel.animationBehavior = .none
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
             panels[metric] = panel
@@ -105,10 +107,11 @@ final class StatusBarController: NSObject {
         } else {
             store.show(metric)
             hostingController.view.layoutSubtreeIfNeeded()
-            let size = hostingController.view.fittingSize
-            panel.setContentSize(NSSize(width: max(320, size.width), height: size.height))
+            let size = hostingController.sizeThatFits(in: NSSize(width: 340, height: 900))
+            let height = max(210, size.height)
+            panel.setContentSize(NSSize(width: 340, height: height))
             position(panel, below: button)
-            panel.orderFrontRegardless()
+            panel.orderFront(nil)
         }
     }
 
