@@ -7,6 +7,7 @@ A small, native macOS menu bar monitor focused on CPU, GPU, and RAM.
 - Shows CPU, GPU, and RAM percentages as three independent menu bar items.
 - Click CPU to see the five processes with the highest recent CPU usage.
 - Click RAM to see the five processes using the most physical memory.
+- Force quit a process from either list after confirming the action; macOS may prevent quitting protected processes.
 - Click GPU for the available aggregate GPU reading and its process-visibility note.
 - Samples lightweight system totals every two seconds; process rankings are read only while a popover is open.
 - Uses Swift, AppKit, SwiftUI, and system frameworks only. No analytics, network access, or third-party dependencies.

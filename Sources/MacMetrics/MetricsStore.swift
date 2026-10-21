@@ -6,6 +6,7 @@ import IOKit
 final class MetricsStore: ObservableObject {
     @Published private(set) var snapshot = MetricSnapshot()
     @Published private(set) var activeMetric: Metric?
+    @Published private(set) var terminationFailure: String?
 
     private var timer: Timer?
     private var previousCPU = host_cpu_load_info()
@@ -28,6 +29,37 @@ final class MetricsStore: ObservableObject {
 
     func hide(_ metric: Metric) {
         if activeMetric == metric { activeMetric = nil }
+    }
+
+    func forceQuit(_ process: ProcessUsage) {
+        terminationFailure = nil
+        guard process.pid > 1, process.pid != getpid() else {
+            terminationFailure = "This process can’t be quit from Mac Metrics."
+            return
+        }
+        var identity = proc_bsdinfo()
+        let identitySize = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(process.pid, PROC_PIDTBSDINFO, 0, &identity, identitySize) == identitySize,
+              identity.pbi_uid == uid_t(getuid()) else {
+            terminationFailure = "macOS doesn’t allow this process to be quit from your account."
+            return
+        }
+
+        let succeeded: Bool
+        if let application = NSRunningApplication(processIdentifier: process.pid) {
+            succeeded = application.forceTerminate()
+        } else {
+            succeeded = kill(process.pid, SIGKILL) == 0
+        }
+        if !succeeded {
+            terminationFailure = "macOS couldn’t quit \(process.name). It may have already closed."
+            return
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, let metric = self.activeMetric, metric != .gpu else { return }
+            self.refreshProcesses(for: metric)
+        }
     }
 
     func refreshProcesses(for metric: Metric) {
@@ -139,6 +171,10 @@ final class MetricsStore: ObservableObject {
         guard actual > 0 else { return [] }
         return pids.prefix(Int(actual) / MemoryLayout<pid_t>.size).compactMap { pid in
             guard pid > 0 else { return nil }
+            var identity = proc_bsdinfo()
+            let identitySize = Int32(MemoryLayout<proc_bsdinfo>.size)
+            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &identity, identitySize) == identitySize,
+                  identity.pbi_uid == uid_t(getuid()) else { return nil }
             var task = proc_taskinfo()
             let bytes = withUnsafeMutablePointer(to: &task) {
                 proc_pidinfo(pid, PROC_PIDTASKINFO, 0, $0, Int32(MemoryLayout<proc_taskinfo>.size))

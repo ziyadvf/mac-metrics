@@ -3,6 +3,8 @@ import SwiftUI
 struct MetricPopover: View {
     let metric: Metric
     @ObservedObject var store: MetricsStore
+    @State private var processToQuit: ProcessUsage?
+    @State private var showTerminationFailure = false
 
     private var value: Double {
         switch metric {
@@ -16,31 +18,30 @@ struct MetricPopover: View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(metric.rawValue).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+                    Label(metric.rawValue, systemImage: metric.symbol)
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
                     Text(metric == .gpu && store.snapshot.gpuPercent == nil ? "Unavailable" : String(format: "%.0f%%", value))
-                        .font(.system(size: 34, weight: .semibold, design: .rounded)).contentTransition(.numericText())
+                        .font(.system(size: 38, weight: .semibold, design: .rounded)).contentTransition(.numericText())
                 }
                 Spacer()
-                Image(systemName: metric.symbol).font(.system(size: 24, weight: .medium)).foregroundStyle(tint)
-                    .frame(width: 56, height: 56)
-                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
 
             if metric == .memory {
                 Text("\(MetricsStore.formatBytes(store.snapshot.memoryUsed)) of \(MetricsStore.formatBytes(store.snapshot.memoryTotal))")
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                ProgressView(value: value, total: 100).tint(tint)
             } else {
                 ProgressView(value: metric == .gpu && store.snapshot.gpuPercent == nil ? 0 : value, total: 100)
                     .tint(tint)
             }
 
             HStack {
-                Text(metric == .cpu ? "TOP PROCESSES" : metric == .gpu ? "GPU ACTIVITY" : "MEMORY FOOTPRINT")
-                    .font(.system(size: 10, weight: .bold, design: .rounded)).tracking(1.1).foregroundStyle(.secondary)
+                Text(metric == .cpu ? "Processes" : metric == .gpu ? "GPU activity" : "Memory use")
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                if metric != .gpu { Text("TOP 5").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary) }
+                if metric != .gpu { Text("Top five").font(.system(size: 11)).foregroundStyle(.secondary) }
             }
-            .padding(.top, 2)
+            .padding(.top, 1)
 
             if metric == .gpu {
                 ContentUnavailableView("Per-process GPU data", systemImage: "gpu",
@@ -55,25 +56,34 @@ struct MetricPopover: View {
                     VStack(spacing: 0) {
                         ForEach(Array(processes.enumerated()), id: \.element.id) { index, process in
                             processRow(process, rank: index + 1)
-                            if index != processes.count - 1 { Divider().padding(.leading, 38) }
+                            if index != processes.count - 1 { Divider().padding(.leading, 30) }
                         }
                     }
                 }
             }
             Spacer(minLength: 0)
-            HStack(spacing: 5) {
-                Circle().fill(.green).frame(width: 5, height: 5)
-                Text("Updated just now · sampled every 2 seconds")
-            }.font(.system(size: 10)).foregroundStyle(.tertiary)
         }
         .padding(20)
         .frame(width: 360, height: 420, alignment: .topLeading)
-        .background {
-            if #available(macOS 26.0, *) {
-                RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.clear).glassEffect(.regular, in: .rect(cornerRadius: 24))
-            } else {
-                RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.ultraThinMaterial)
+        .background(Color.clear)
+        .confirmationDialog(
+            "Force quit \(processToQuit?.name ?? "process")?",
+            isPresented: Binding(get: { processToQuit != nil }, set: { if !$0 { processToQuit = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Force Quit", role: .destructive) {
+                if let processToQuit { store.forceQuit(processToQuit) }
+                processToQuit = nil
+                if store.terminationFailure != nil { showTerminationFailure = true }
             }
+            Button("Cancel", role: .cancel) { processToQuit = nil }
+        } message: {
+            Text("Any unsaved work in this process will be lost.")
+        }
+        .alert("Couldn’t quit process", isPresented: $showTerminationFailure) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(store.terminationFailure ?? "Try again.")
         }
     }
 
@@ -87,7 +97,7 @@ struct MetricPopover: View {
 
     private func processRow(_ process: ProcessUsage, rank: Int) -> some View {
         HStack(spacing: 11) {
-            Text(String(format: "%02d", rank)).font(.system(size: 10, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).frame(width: 18)
+            Text("\(rank)").font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).frame(width: 12)
             VStack(alignment: .leading, spacing: 2) {
                 Text(process.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
                 Text("PID \(process.pid)").font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
@@ -99,7 +109,16 @@ struct MetricPopover: View {
                 Text(process.detail).font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
                 Text(String(format: "%.1f%%", process.value)).font(.system(size: 9)).foregroundStyle(.secondary).frame(width: 42, alignment: .trailing)
             }
+            Button {
+                processToQuit = process
+            } label: {
+                Image(systemName: "xmark.circle.fill").font(.system(size: 14))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Force Quit \(process.name)")
+            .accessibilityLabel("Force Quit \(process.name)")
         }
-        .padding(.vertical, 9)
+        .padding(.vertical, 8)
     }
 }

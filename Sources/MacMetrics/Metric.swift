@@ -10,7 +10,7 @@ enum Metric: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .cpu: "cpu"
-        case .gpu: "gpu"
+        case .gpu: "display.2"
         case .memory: "memorychip"
         }
     }

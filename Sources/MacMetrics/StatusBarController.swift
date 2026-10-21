@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class StatusBarController: NSObject {
+final class StatusBarController: NSObject, NSPopoverDelegate {
     private let store = MetricsStore()
     private var items: [Metric: NSStatusItem] = [:]
     private var popovers: [Metric: NSPopover] = [:]
@@ -19,6 +19,7 @@ final class StatusBarController: NSObject {
 
             let popover = NSPopover()
             popover.behavior = .transient
+            popover.delegate = self
             popover.contentSize = NSSize(width: 360, height: 420)
             popover.contentViewController = NSHostingController(rootView: MetricPopover(metric: metric, store: store))
             popovers[metric] = popover
@@ -47,6 +48,12 @@ final class StatusBarController: NSObject {
             store.show(metric)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        guard let closedPopover = notification.object as? NSPopover,
+              let metric = popovers.first(where: { $0.value === closedPopover })?.key else { return }
+        store.hide(metric)
     }
 }
 
