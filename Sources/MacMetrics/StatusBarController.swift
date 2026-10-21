@@ -32,9 +32,9 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 
     private func refreshLabels() {
         let snapshot = store.snapshot
-        items[.cpu]?.button?.title = String(format: "CPU %.0f%%", snapshot.cpuPercent)
-        items[.gpu]?.button?.title = snapshot.gpuPercent.map { String(format: "GPU %.0f%%", $0) } ?? "GPU —"
-        items[.memory]?.button?.title = String(format: "RAM %.0f%%", snapshot.memoryPercent)
+        items[.memory]?.button?.title = String(format: "R%.0f%%", snapshot.memoryPercent)
+        items[.gpu]?.button?.title = snapshot.gpuPercent.map { String(format: "G%.0f%%", $0) } ?? "G—"
+        items[.cpu]?.button?.title = String(format: "C%.0f%%", snapshot.cpuPercent)
     }
 
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
