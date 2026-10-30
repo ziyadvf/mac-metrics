@@ -8,7 +8,7 @@ final class StatusBarController: NSObject {
     private let store: MetricsStore
     private let settingsWindow: SettingsWindowController
     private let statusItem: NSStatusItem
-    private let statusStack = NSStackView()
+    private let statusContainer = NSView()
     private var metricButtons: [Metric: NSButton] = [:]
     private var panels: [Metric: NSPanel] = [:]
     private var hostingControllers: [Metric: NSHostingController<MetricPopover>] = [:]
@@ -78,7 +78,6 @@ final class StatusBarController: NSObject {
         rebuildStatusSegments()
         updateStatusItemWidth()
         refreshLabels()
-        refreshLabels()
     }
 
     private func isMetricVisible(_ metric: Metric) -> Bool {
@@ -120,23 +119,10 @@ final class StatusBarController: NSObject {
     }
 
     private func configureStatusItem() {
-        guard let button = statusItem.button else { return }
-        button.title = ""
-        button.attributedTitle = NSAttributedString(string: "")
-        button.target = nil
-        button.action = nil
-        button.isBordered = false
-        statusStack.orientation = .horizontal
-        statusStack.alignment = .centerY
-        statusStack.distribution = .fill
-        statusStack.spacing = 3
-        statusStack.translatesAutoresizingMaskIntoConstraints = false
-        button.addSubview(statusStack)
-        NSLayoutConstraint.activate([
-            statusStack.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 8),
-            statusStack.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -8),
-            statusStack.centerYAnchor.constraint(equalTo: button.centerYAnchor)
-        ])
+        // A custom status view owns the controls directly. NSStatusBarButton's
+        // tracking loop must not wrap the three independent buttons.
+        statusContainer.frame = NSRect(x: 0, y: 0, width: 148, height: NSStatusBar.system.thickness)
+        statusItem.view = statusContainer
 
         for metric in [Metric.memory, .gpu, .cpu] {
             let metricButton = NSButton(title: "", target: self, action: #selector(togglePopover(_:)))
@@ -148,35 +134,28 @@ final class StatusBarController: NSObject {
             metricButton.setContentHuggingPriority(.required, for: .horizontal)
             metricButton.setContentCompressionResistancePriority(.required, for: .horizontal)
             metricButton.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
+            statusContainer.addSubview(metricButton)
             metricButtons[metric] = metricButton
         }
     }
 
     private func rebuildStatusSegments() {
-        for view in statusStack.arrangedSubviews {
-            statusStack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-
-        let orderedMetrics: [Metric] = [.memory, .gpu, .cpu]
-        var hasPreviousSegment = false
-        for metric in orderedMetrics where isMetricVisible(metric) {
-            if hasPreviousSegment {
-                let separator = NSTextField(labelWithString: "·")
-                separator.font = .systemFont(ofSize: 11)
-                separator.textColor = .tertiaryLabelColor
-                statusStack.addArrangedSubview(separator)
-            }
-            if let button = metricButtons[metric] {
-                statusStack.addArrangedSubview(button)
-                hasPreviousSegment = true
-            }
+        for (metric, button) in metricButtons {
+            button.isHidden = !isMetricVisible(metric)
         }
     }
 
     private func updateStatusItemWidth() {
-        statusStack.layoutSubtreeIfNeeded()
-        statusItem.length = max(22, statusStack.fittingSize.width + 16)
+        let height = NSStatusBar.system.thickness
+        var x: CGFloat = 4
+        for metric in [Metric.memory, .gpu, .cpu] where isMetricVisible(metric) {
+            guard let button = metricButtons[metric] else { continue }
+            button.frame = NSRect(x: x, y: 0, width: 44, height: height)
+            x += 48
+        }
+        let width = max(22, x)
+        statusContainer.setFrameSize(NSSize(width: width, height: height))
+        statusItem.length = width
     }
 
     private func statusLabel(for metric: Metric, snapshot: MetricSnapshot) -> String {
@@ -218,8 +197,8 @@ final class StatusBarController: NSObject {
     private func closePopoversIfOutside(_ point: NSPoint) {
         guard panels.values.contains(where: \.isVisible) else { return }
         let clickedStatusButton: Bool
-        if let button = statusItem.button, let window = button.window {
-            clickedStatusButton = window.convertToScreen(button.convert(button.bounds, to: nil)).contains(point)
+        if let window = statusContainer.window {
+            clickedStatusButton = window.convertToScreen(statusContainer.convert(statusContainer.bounds, to: nil)).contains(point)
         } else {
             clickedStatusButton = false
         }
