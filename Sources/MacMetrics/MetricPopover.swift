@@ -22,11 +22,19 @@ struct MetricPopover: View {
         VStack(alignment: .leading, spacing: 8) {
             metricSummary
 
+            if metric == .cpu, !store.snapshot.cpuCoreGroups.isEmpty {
+                cpuCoreUsage
+            }
+
             HStack(alignment: .firstTextBaseline) {
                 Text(metric == .gpu ? "GPU activity" : metric == .cpu ? "CPU processes" : "Memory use")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                if metric != .gpu { Text("Top 5").font(.system(size: 11)).foregroundStyle(.secondary) }
+                if metric != .gpu {
+                    Text(metric == .cpu ? "Top 5 · per core" : "Top 5 · % of RAM")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.top, 2)
 
@@ -124,6 +132,59 @@ struct MetricPopover: View {
         case .gpu: hasValue ? "" : "Unavailable"
         case .memory:
             "\(MetricsStore.formatBytes(store.snapshot.memoryUsed)) of \(MetricsStore.formatBytes(store.snapshot.memoryTotal))"
+        }
+    }
+
+    private var cpuCoreUsage: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(store.snapshot.cpuCoreGroups.enumerated()), id: \.element.id) { groupIndex, group in
+                if groupIndex > 0 { Divider() }
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text("\(group.type.rawValue) cores")
+                            .font(.system(size: 11, weight: .medium))
+                        Spacer()
+                        Text("\(group.usage.count)")
+                            .font(.system(size: 10, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 27), spacing: 5)], alignment: .leading, spacing: 5) {
+                        ForEach(Array(group.usage.enumerated()), id: \.offset) { index, percent in
+                            VStack(spacing: 3) {
+                                Text(String(format: "%.0f%%", percent))
+                                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                GeometryReader { geometry in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(Color.primary.opacity(0.10))
+                                        Capsule()
+                                            .fill(coreTint(for: group.type))
+                                            .frame(width: geometry.size.width * min(1, max(0, percent / 100)))
+                                    }
+                                }
+                                .frame(height: 4)
+                                Text("\(index + 1)")
+                                    .font(.system(size: 8, weight: .regular, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(group.type.rawValue) core \(index + 1), \(Int(percent.rounded())) percent")
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func coreTint(for type: CPUCoreType) -> Color {
+        switch type {
+        case .performance: .blue
+        case .efficiency: .teal
+        case .standard: .accentColor
         }
     }
 
