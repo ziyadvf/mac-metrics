@@ -124,7 +124,17 @@ final class StatusBarController: NSObject {
         // A custom status view owns the controls directly. NSStatusBarButton's
         // tracking loop must not wrap the three independent buttons.
         statusContainer.frame = NSRect(x: 0, y: 0, width: 216, height: NSStatusBar.system.thickness)
+        if let cell = statusItem.button?.cell as? NSButtonCell {
+            cell.highlightsBy = []
+            cell.showsStateBy = []
+        }
         statusItem.view = statusContainer
+        statusItem.highlightMode = false
+        if let cell = statusItem.button?.cell as? NSButtonCell {
+            cell.highlightsBy = []
+            cell.showsStateBy = []
+        }
+        statusItem.button?.highlight(false)
         statusItem.button?.target = nil
         statusItem.button?.action = nil
 

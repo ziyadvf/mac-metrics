@@ -23,6 +23,7 @@ struct MetricPopover: View {
             metricSummary
 
             if metric == .memory {
+                memoryBreakdown
                 HStack {
                     Text("Swap")
                     Spacer()
@@ -47,7 +48,7 @@ struct MetricPopover: View {
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if metric != .gpu {
-                    Text(metric == .cpu ? "Top 5 · per core" : "Top 5 · % of RAM")
+                    Text(metric == .cpu ? "Top 5 · % of CPU" : "Top 5 · % of RAM")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -164,14 +165,19 @@ struct MetricPopover: View {
                             .font(.system(size: 10, weight: .regular, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 27), spacing: 5)], alignment: .leading, spacing: 5) {
+                    let rows = max(1, (group.usage.count + 5) / 6)
+                    let columns = max(1, (group.usage.count + rows - 1) / rows)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
                         ForEach(Array(group.usage.enumerated()), id: \.offset) { index, percent in
-                            VStack(spacing: 3) {
-                                Text(String(format: "%.0f%%", percent))
-                                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                    .monospacedDigit()
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            VStack(spacing: 5) {
+                                HStack(spacing: 2) {
+                                    Text("\(corePrefix(for: group.type))\(index + 1)")
+                                        .foregroundStyle(.tertiary)
+                                    Spacer(minLength: 0)
+                                    Text(String(format: "%.0f%%", percent))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
                                 GeometryReader { geometry in
                                     ZStack(alignment: .leading) {
                                         Capsule().fill(Color.primary.opacity(0.10))
@@ -180,11 +186,7 @@ struct MetricPopover: View {
                                             .frame(width: geometry.size.width * min(1, max(0, percent / 100)))
                                     }
                                 }
-                                .frame(height: 4)
-                                Text("\(index + 1)")
-                                    .font(.system(size: 8, weight: .regular, design: .monospaced))
-                                    .foregroundStyle(.tertiary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(height: 6)
                             }
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("\(group.type.rawValue) core \(index + 1), \(Int(percent.rounded())) percent")
@@ -194,6 +196,57 @@ struct MetricPopover: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private var memoryBreakdown: some View {
+        let snapshot = store.snapshot
+        let segments: [(String, UInt64, Color)] = [
+            ("Apps", snapshot.memoryApps, .teal),
+            ("Wired", snapshot.memoryWired, .blue),
+            ("Compressed", snapshot.memoryCompressed, .purple)
+        ]
+        return VStack(spacing: 9) {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.10))
+                    HStack(spacing: 0) {
+                        ForEach(segments.indices, id: \.self) { index in
+                            Rectangle()
+                                .fill(segments[index].2)
+                                .frame(width: geometry.size.width * Double(segments[index].1) / Double(max(1, snapshot.memoryTotal)))
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .clipShape(Capsule())
+                }
+            }
+            .frame(height: 6)
+            HStack(alignment: .top, spacing: 8) {
+                ForEach(segments.indices, id: \.self) { index in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Circle().fill(segments[index].2).frame(width: 5, height: 5)
+                            Text(segments[index].0).foregroundStyle(.secondary)
+                        }
+                        .font(.system(size: 10))
+                        Text(MetricsStore.formatBytes(segments[index].1))
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityLabel("Apps \(MetricsStore.formatBytes(snapshot.memoryApps)), wired \(MetricsStore.formatBytes(snapshot.memoryWired)), compressed \(MetricsStore.formatBytes(snapshot.memoryCompressed))")
+    }
+
+    private func corePrefix(for type: CPUCoreType) -> String {
+        switch type {
+        case .performance: "P"
+        case .efficiency: "E"
+        case .standard: "C"
+        }
     }
 
     private func coreTint(for type: CPUCoreType) -> Color {
@@ -242,7 +295,7 @@ struct MetricPopover: View {
                 .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()
                 .lineLimit(1)
-                .frame(width: metric == .memory ? 64 : 42, alignment: .trailing)
+                .frame(width: metric == .memory ? 64 : 52, alignment: .trailing)
             if metric == .memory {
                 Text(String(format: "%.1f%%", process.value))
                     .font(.system(size: 11))

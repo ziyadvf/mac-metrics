@@ -13,6 +13,7 @@ final class MetricsStore: ObservableObject {
         mach_timebase_info(&timebase)
         return Double(timebase.numer) / Double(max(1, timebase.denom))
     }()
+    private let logicalCoreCount = max(1, ProcessInfo.processInfo.processorCount)
     private var timer: Timer?
     private var refreshInterval: TimeInterval
     private var previousProcessorTicks: [ProcessorTicks] = []
@@ -101,9 +102,9 @@ final class MetricsStore: ObservableObject {
                 guard let priorCPUTime = previousProcesses[process.pid] else { return nil }
                 let delta = process.cpuAbsoluteTime >= priorCPUTime
                     ? process.cpuAbsoluteTime - priorCPUTime : 0
-                // Process CPU is shown per core: one fully occupied core is 100%.
-                // A multithreaded process can therefore exceed 100%.
-                let percent = Double(delta) * cpuNanosecondsPerTick / (elapsed * 1_000_000_000) * 100
+                // Normalize process CPU time to the whole machine, matching the
+                // system CPU scale. One occupied core on an 8-core Mac is 12.5%.
+                let percent = Double(delta) * cpuNanosecondsPerTick / (elapsed * 1_000_000_000 * Double(logicalCoreCount)) * 100
                 return (process.pid, process.name, percent, String(format: "%.1f%%", percent))
             }.sorted { $0.value > $1.value }
         } else {
@@ -282,6 +283,10 @@ final class MetricsStore: ObservableObject {
         // storage. Reclaimable file cache is excluded, as in Activity Monitor.
         let appPages = UInt64(vm.internal_page_count) > UInt64(vm.purgeable_count)
             ? UInt64(vm.internal_page_count) - UInt64(vm.purgeable_count) : 0
+        let pageSize = UInt64(getpagesize())
+        snapshot.memoryApps = appPages * pageSize
+        snapshot.memoryWired = UInt64(vm.wire_count) * pageSize
+        snapshot.memoryCompressed = UInt64(vm.compressor_page_count) * pageSize
         let usedPages = appPages + UInt64(vm.wire_count) + UInt64(vm.compressor_page_count)
         return (min(total, usedPages * UInt64(getpagesize())), total)
     }

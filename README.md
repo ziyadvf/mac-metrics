@@ -17,7 +17,7 @@ A small, native macOS menu bar monitor focused on CPU, GPU, and RAM.
 ## Percentage conventions
 
 - System CPU and each core use busy tick deltas divided by total tick deltas (0–100%).
-- Process CPU uses Mach absolute-time deltas converted to nanoseconds, divided by monotonic elapsed time. One fully occupied core is 100%; multiple threads can exceed 100%.
+- Process CPU uses Mach absolute-time deltas converted to nanoseconds, divided by monotonic elapsed time and the number of logical cores. Values are a percentage of total CPU capacity; one fully occupied core on an 8-core Mac is 12.5%.
 - RAM usage is non-purgeable anonymous app pages plus wired and compressed storage, divided by physical RAM. Reclaimable file cache is excluded.
 - Each process’s RAM percentage is its physical footprint divided by physical RAM. Swap is disk-backed memory and is shown separately as used / allocated swap.
 - Core classifications come from the machine’s CPU registry identifiers. If those are unavailable, cores appear in a generic group.
