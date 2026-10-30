@@ -107,7 +107,7 @@ final class StatusBarController: NSObject {
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
         let orderedMetrics: [Metric] = [.memory, .gpu, .cpu]
         let visibleMetrics = orderedMetrics.filter(isMetricVisible)
-        let separator = "   "
+        let separator = "  ·  "
         let separatorWidth = (separator as NSString).size(withAttributes: attributes).width
         let title = NSMutableAttributedString(string: "")
         var cursor: CGFloat = 0
@@ -127,6 +127,9 @@ final class StatusBarController: NSObject {
 
         statusSegments = nextSegments
         statusItem.button?.attributedTitle = title
+        // Variable-length status items don’t always recalculate their width when
+        // only attributedTitle changes. Keep the full three-metric title visible.
+        statusItem.length = max(22, cursor + 16)
         statusItem.button?.setAccessibilityLabel(visibleMetrics.map {
             "\($0.rawValue) \(statusLabel(for: $0, snapshot: snapshot).dropFirst().trimmingCharacters(in: .whitespaces))"
         }.joined(separator: ", "))
