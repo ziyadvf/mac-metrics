@@ -58,9 +58,9 @@ final class StatusBarController: NSObject {
     }
 
     private func bindPreferences() {
-        preferences.$showsCPU.sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
-        preferences.$showsGPU.sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
-        preferences.$showsRAM.sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
+        preferences.$showsCPU.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
+        preferences.$showsGPU.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
+        preferences.$showsRAM.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
         preferences.$refreshInterval.dropFirst().sink { [weak self] interval in
             self?.store.setRefreshInterval(interval)
             self?.scheduleLabelRefresh(interval: interval)
@@ -74,6 +74,7 @@ final class StatusBarController: NSObject {
             guard !isMetricVisible(metric), let panel = panels[metric], panel.isVisible else { continue }
             panel.orderOut(nil)
             store.hide(metric)
+            metricButtons[metric]?.state = .off
         }
         rebuildStatusSegments()
         updateStatusItemWidth()
@@ -99,19 +100,20 @@ final class StatusBarController: NSObject {
         for (metric, panel) in panels where panel.isVisible {
             panel.orderOut(nil)
             store.hide(metric)
+            metricButtons[metric]?.state = .off
         }
         settingsWindow.show()
     }
 
     private func refreshLabels() {
         let snapshot = store.snapshot
-        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
         let orderedMetrics: [Metric] = [.memory, .gpu, .cpu]
         for metric in orderedMetrics {
             let label = statusLabel(for: metric, snapshot: snapshot)
             metricButtons[metric]?.attributedTitle = NSAttributedString(string: label, attributes: attributes)
-            metricButtons[metric]?.setAccessibilityLabel("\(metric.rawValue) \(label.dropFirst().trimmingCharacters(in: .whitespaces))")
+            metricButtons[metric]?.setAccessibilityLabel(label)
         }
 
         updateStatusItemWidth()
@@ -121,16 +123,16 @@ final class StatusBarController: NSObject {
     private func configureStatusItem() {
         // A custom status view owns the controls directly. NSStatusBarButton's
         // tracking loop must not wrap the three independent buttons.
-        statusContainer.frame = NSRect(x: 0, y: 0, width: 148, height: NSStatusBar.system.thickness)
+        statusContainer.frame = NSRect(x: 0, y: 0, width: 216, height: NSStatusBar.system.thickness)
         statusItem.view = statusContainer
 
-        for metric in [Metric.memory, .gpu, .cpu] {
-            let metricButton = NSButton(title: "", target: self, action: #selector(togglePopover(_:)))
+        for metric in [Metric.cpu, .gpu, .memory] {
+            let metricButton = MetricTileButton(title: "", target: self, action: #selector(togglePopover(_:)))
             metricButton.tag = Metric.allCases.firstIndex(of: metric) ?? 0
             metricButton.isBordered = false
             metricButton.bezelStyle = .regularSquare
             metricButton.alignment = .center
-            metricButton.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            metricButton.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
             metricButton.setContentHuggingPriority(.required, for: .horizontal)
             metricButton.setContentCompressionResistancePriority(.required, for: .horizontal)
             metricButton.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
@@ -148,10 +150,10 @@ final class StatusBarController: NSObject {
     private func updateStatusItemWidth() {
         let height = NSStatusBar.system.thickness
         var x: CGFloat = 4
-        for metric in [Metric.memory, .gpu, .cpu] where isMetricVisible(metric) {
+        for metric in [Metric.cpu, .gpu, .memory] where isMetricVisible(metric) {
             guard let button = metricButtons[metric] else { continue }
-            button.frame = NSRect(x: x, y: 0, width: 44, height: height)
-            x += 48
+            button.frame = NSRect(x: x, y: 0, width: 66, height: height)
+            x += 70
         }
         let width = max(22, x)
         statusContainer.setFrameSize(NSSize(width: width, height: height))
@@ -160,10 +162,10 @@ final class StatusBarController: NSObject {
 
     private func statusLabel(for metric: Metric, snapshot: MetricSnapshot) -> String {
         switch metric {
-        case .memory: String(format: "R%3.0f%%", snapshot.memoryPercent)
+        case .memory: String(format: "RAM %3.0f%%", snapshot.memoryPercent)
         case .gpu:
-            snapshot.gpuPercent.map { String(format: "G%3.0f%%", $0) } ?? "G  —%"
-        case .cpu: String(format: "C%3.0f%%", snapshot.cpuPercent)
+            snapshot.gpuPercent.map { String(format: "GPU %3.0f%%", $0) } ?? "GPU  —%"
+        case .cpu: String(format: "CPU %3.0f%%", snapshot.cpuPercent)
         }
     }
 
@@ -208,6 +210,7 @@ final class StatusBarController: NSObject {
             if !panel.frame.contains(point) {
                 panel.orderOut(nil)
                 store.hide(metric)
+            metricButtons[metric]?.state = .off
             }
         }
     }
@@ -219,12 +222,15 @@ final class StatusBarController: NSObject {
         for (otherMetric, otherPanel) in panels where otherMetric != metric && otherPanel.isVisible {
             otherPanel.orderOut(nil)
             store.hide(otherMetric)
+            metricButtons[otherMetric]?.state = .off
         }
         if panel.isVisible {
             panel.orderOut(nil)
             store.hide(metric)
+            metricButtons[metric]?.state = .off
         } else {
             store.show(metric)
+            sender.state = .on
             hostingController.view.layoutSubtreeIfNeeded()
             let size = hostingController.sizeThatFits(in: NSSize(width: 340, height: 900))
             let height = max(210, size.height)
@@ -241,5 +247,29 @@ final class StatusBarController: NSObject {
         let x = min(max(anchor.midX - panel.frame.width / 2, screen.minX + 8), screen.maxX - panel.frame.width - 8)
         let y = max(anchor.minY - panel.frame.height - 4, screen.minY + 8)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+}
+
+
+@MainActor
+private final class MetricTileButton: NSButton {
+    override func draw(_ dirtyRect: NSRect) {
+        let tile = bounds.insetBy(dx: 0, dy: 2)
+        NSColor.labelColor.withAlphaComponent((isHighlighted || state == .on) ? 0.24 : 0.12).setFill()
+        NSBezierPath(roundedRect: tile, xRadius: 5, yRadius: 5).fill()
+        let text = NSAttributedString(string: title, attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor.labelColor
+        ])
+        let size = text.size()
+        text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isHighlighted = true
+        needsDisplay = true
+        _ = sendAction(action, to: target)
+        isHighlighted = false
+        needsDisplay = true
     }
 }

@@ -8,12 +8,18 @@ final class MetricsStore: ObservableObject {
     @Published private(set) var activeMetric: Metric?
     @Published private(set) var terminationFailure: String?
 
+    private let cpuNanosecondsPerTick: Double = {
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        return Double(timebase.numer) / Double(max(1, timebase.denom))
+    }()
     private var timer: Timer?
     private var refreshInterval: TimeInterval
     private var previousProcessorTicks: [ProcessorTicks] = []
     private var previousProcesses: [Int32: UInt64] = [:]
     private var processIcons: [Int32: NSImage?] = [:]
-    private var previousProcessSample = Date()
+    private var previousProcessSample = ProcessInfo.processInfo.systemUptime
+    private lazy var coreTypes = readCoreTypes()
 
     private struct ProcessorTicks {
         let user: UInt32
@@ -83,8 +89,8 @@ final class MetricsStore: ObservableObject {
 
     func refreshProcesses(for metric: Metric) {
         guard metric != .gpu else { return }
-        let now = Date()
-        let elapsed = max(0.1, now.timeIntervalSince(previousProcessSample))
+        let now = ProcessInfo.processInfo.systemUptime
+        let elapsed = max(0.001, now - previousProcessSample)
         let current = readProcesses(includeFootprint: metric == .memory)
         let currentPIDs = Set(current.map(\.pid))
         processIcons = processIcons.filter { currentPIDs.contains($0.key) }
@@ -93,11 +99,11 @@ final class MetricsStore: ObservableObject {
         if metric == .cpu {
             ranked = current.compactMap { process in
                 guard let priorCPUTime = previousProcesses[process.pid] else { return nil }
-                let delta = process.cpuNanoseconds >= priorCPUTime
-                    ? process.cpuNanoseconds - priorCPUTime : 0
+                let delta = process.cpuAbsoluteTime >= priorCPUTime
+                    ? process.cpuAbsoluteTime - priorCPUTime : 0
                 // Process CPU is shown per core: one fully occupied core is 100%.
                 // A multithreaded process can therefore exceed 100%.
-                let percent = Double(delta) / (elapsed * 1_000_000_000) * 100
+                let percent = Double(delta) * cpuNanosecondsPerTick / (elapsed * 1_000_000_000) * 100
                 return (process.pid, process.name, percent, String(format: "%.1f%%", percent))
             }.sorted { $0.value > $1.value }
         } else {
@@ -119,7 +125,7 @@ final class MetricsStore: ObservableObject {
             )
         }
 
-        previousProcesses = Dictionary(uniqueKeysWithValues: current.map { ($0.pid, $0.cpuNanoseconds) })
+        previousProcesses = Dictionary(uniqueKeysWithValues: current.map { ($0.pid, $0.cpuAbsoluteTime) })
         previousProcessSample = now
         snapshot.processUsage[metric] = usage
     }
@@ -158,6 +164,15 @@ final class MetricsStore: ObservableObject {
         snapshot.memoryUsed = memory.used
         snapshot.memoryTotal = memory.total
         snapshot.memoryPercent = memory.total == 0 ? 0 : Double(memory.used) / Double(memory.total) * 100
+        var swap = xsw_usage()
+        var swapSize = MemoryLayout<xsw_usage>.size
+        if sysctlbyname("vm.swapusage", &swap, &swapSize, nil, 0) == 0 {
+            snapshot.swapUsed = swap.xsu_used
+            snapshot.swapTotal = swap.xsu_total
+        } else {
+            snapshot.swapUsed = nil
+            snapshot.swapTotal = nil
+        }
         snapshot.gpuPercent = readGPUUtilization()
         snapshot.updatedAt = Date()
         if let activeMetric, activeMetric != .gpu { refreshProcesses(for: activeMetric) }
@@ -221,29 +236,36 @@ final class MetricsStore: ObservableObject {
     }
 
     private func makeCoreGroups(from usage: [Double]) -> [CPUCoreGroup] {
-        guard let levelCount = sysctlInteger("hw.nperflevels"), levelCount == 2,
-              let performanceCount = sysctlInteger("hw.perflevel0.logicalcpu"),
-              let efficiencyCount = sysctlInteger("hw.perflevel1.logicalcpu"),
-              performanceCount > 0, efficiencyCount > 0,
-              performanceCount + efficiencyCount == usage.count else {
+        guard usage.indices.allSatisfy({ coreTypes[$0] != nil }) else {
             return usage.isEmpty ? [] : [CPUCoreGroup(type: .standard, usage: usage)]
         }
-
-        // Mach enumerates Apple Silicon's efficiency CPUs first; hw.perflevel0 is
-        // the highest-performance cluster, while perflevel1 is the efficiency cluster.
-        let efficiency = Array(usage.prefix(efficiencyCount))
-        let performance = Array(usage.suffix(performanceCount))
-        return [
-            CPUCoreGroup(type: .performance, usage: performance),
-            CPUCoreGroup(type: .efficiency, usage: efficiency)
-        ]
+        return [CPUCoreType.performance, .efficiency, .standard].compactMap { type in
+            let values = usage.indices.filter { coreTypes[$0] == type }.map { usage[$0] }
+            return values.isEmpty ? nil : CPUCoreGroup(type: type, usage: values)
+        }
     }
 
-    private func sysctlInteger(_ name: String) -> Int? {
-        var value: Int32 = 0
-        var size = MemoryLayout<Int32>.size
-        guard sysctlbyname(name, &value, &size, nil, 0) == 0 else { return nil }
-        return Int(value)
+    private func readCoreTypes() -> [Int: CPUCoreType] {
+        let cpus = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/cpus")
+        guard cpus != 0 else { return [:] }
+        defer { IOObjectRelease(cpus) }
+        var iterator: io_iterator_t = 0
+        guard IORegistryEntryGetChildIterator(cpus, kIODeviceTreePlane, &iterator) == KERN_SUCCESS else { return [:] }
+        defer { IOObjectRelease(iterator) }
+        var result: [Int: CPUCoreType] = [:]
+        var cpu = IOIteratorNext(iterator)
+        while cpu != 0 {
+            let entry = cpu
+            defer { IOObjectRelease(entry) }
+            if let number = IORegistryEntryCreateCFProperty(cpu, "logical-cpu-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber,
+               let cluster = IORegistryEntryCreateCFProperty(cpu, "cluster-type" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data {
+                let name = String(decoding: cluster.prefix { $0 != 0 }, as: UTF8.self)
+                if name == "P" { result[number.intValue] = .performance }
+                if name == "E" { result[number.intValue] = .efficiency }
+            }
+            cpu = IOIteratorNext(iterator)
+        }
+        return result
     }
 
     private func readMemory() -> (used: UInt64, total: UInt64) {
@@ -255,9 +277,13 @@ final class MetricsStore: ObservableObject {
             }
         }
         let total = UInt64(ProcessInfo.processInfo.physicalMemory)
-        guard result == KERN_SUCCESS else { return (0, total) }
-        let freeBytes = min(total, UInt64(vm.free_count) * UInt64(getpagesize()))
-        return (total - freeBytes, total)
+        guard result == KERN_SUCCESS else { return (snapshot.memoryUsed, total) }
+        // Anonymous app pages minus purgeable pages, plus wired and compressed
+        // storage. Reclaimable file cache is excluded, as in Activity Monitor.
+        let appPages = UInt64(vm.internal_page_count) > UInt64(vm.purgeable_count)
+            ? UInt64(vm.internal_page_count) - UInt64(vm.purgeable_count) : 0
+        let usedPages = appPages + UInt64(vm.wire_count) + UInt64(vm.compressor_page_count)
+        return (min(total, usedPages * UInt64(getpagesize())), total)
     }
 
     private func readGPUUtilization() -> Double? {
@@ -283,7 +309,7 @@ final class MetricsStore: ObservableObject {
         return nil
     }
 
-    private func readProcesses(includeFootprint: Bool) -> [(pid: Int32, name: String, cpuNanoseconds: UInt64, footprint: UInt64?)] {
+    private func readProcesses(includeFootprint: Bool) -> [(pid: Int32, name: String, cpuAbsoluteTime: UInt64, footprint: UInt64?)] {
         let byteCount = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
         guard byteCount > 0 else { return [] }
         var pids = [pid_t](repeating: 0, count: Int(byteCount) / MemoryLayout<pid_t>.size + 16)

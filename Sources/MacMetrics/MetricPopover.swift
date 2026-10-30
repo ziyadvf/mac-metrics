@@ -22,6 +22,22 @@ struct MetricPopover: View {
         VStack(alignment: .leading, spacing: 8) {
             metricSummary
 
+            if metric == .memory {
+                HStack {
+                    Text("Swap")
+                    Spacer()
+                    if let used = store.snapshot.swapUsed, let total = store.snapshot.swapTotal {
+                        Text("\(MetricsStore.formatBytes(used)) / \(MetricsStore.formatBytes(total))")
+                            .monospacedDigit()
+                    } else {
+                        Text("Unavailable")
+                    }
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 3)
+            }
+
             if metric == .cpu, !store.snapshot.cpuCoreGroups.isEmpty {
                 cpuCoreUsage
             }

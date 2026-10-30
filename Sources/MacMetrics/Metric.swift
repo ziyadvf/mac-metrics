@@ -55,6 +55,8 @@ struct MetricSnapshot {
     var memoryPercent: Double = 0
     var memoryUsed: UInt64 = 0
     var memoryTotal: UInt64 = 0
+    var swapUsed: UInt64?
+    var swapTotal: UInt64?
     var cpuCoreGroups: [CPUCoreGroup] = []
     var updatedAt = Date()
     var processUsage: [Metric: [ProcessUsage]] = [:]

@@ -4,15 +4,23 @@ A small, native macOS menu bar monitor focused on CPU, GPU, and RAM.
 
 ## What it does
 
-- Shows CPU, GPU, and RAM percentages as three independent menu bar items.
-- Click CPU to see the five processes with the highest recent CPU usage.
-- Click RAM to see the five processes using the most physical memory.
+- Shows CPU, GPU, and RAM percentages as three separate, visibly rounded buttons kept together in one menu bar group.
+- Click CPU to see every core’s utilization, grouped by the hardware’s Performance/Efficiency identifiers, and the five busiest processes.
+- Click RAM to see the five processes with the largest physical footprints and current swap usage.
 - Force quit a process from either list after confirming the action; macOS may prevent quitting protected processes.
 - Click GPU for the available aggregate GPU reading and its process-visibility note.
 - Open Settings from the bottom of a metric panel to control launch at login, visible menu bar metrics, and the refresh interval.
 - Samples lightweight system totals at the selected interval; process rankings are read only while a metric panel is open.
 - Uses Swift, AppKit, SwiftUI, and system frameworks only. No analytics, network access, or third-party dependencies.
 - Uses native Liquid Glass on macOS 26 and newer, with a system material fallback on macOS 14 and 15.
+
+## Percentage conventions
+
+- System CPU and each core use busy tick deltas divided by total tick deltas (0–100%).
+- Process CPU uses Mach absolute-time deltas converted to nanoseconds, divided by monotonic elapsed time. One fully occupied core is 100%; multiple threads can exceed 100%.
+- RAM usage is non-purgeable anonymous app pages plus wired and compressed storage, divided by physical RAM. Reclaimable file cache is excluded.
+- Each process’s RAM percentage is its physical footprint divided by physical RAM. Swap is disk-backed memory and is shown separately as used / allocated swap.
+- Core classifications come from the machine’s CPU registry identifiers. If those are unavailable, cores appear in a generic group.
 
 ## GPU data limits
 
