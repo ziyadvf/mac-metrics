@@ -125,6 +125,8 @@ final class StatusBarController: NSObject {
         // tracking loop must not wrap the three independent buttons.
         statusContainer.frame = NSRect(x: 0, y: 0, width: 216, height: NSStatusBar.system.thickness)
         statusItem.view = statusContainer
+        statusItem.button?.target = nil
+        statusItem.button?.action = nil
 
         for metric in [Metric.cpu, .gpu, .memory] {
             let metricButton = MetricTileButton(title: "", target: self, action: #selector(togglePopover(_:)))
@@ -183,10 +185,9 @@ final class StatusBarController: NSObject {
     }
 
     private func installOutsideClickMonitors() {
-        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .rightMouseDown]) { [weak self] event in
             guard let self else { return event }
-            self.closePopoversIfOutside(NSEvent.mouseLocation)
-            return event
+            return self.routeLocalEvent(event, at: NSEvent.mouseLocation)
         }
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in
@@ -194,6 +195,31 @@ final class StatusBarController: NSObject {
                 self.closePopoversIfOutside(NSEvent.mouseLocation)
             }
         }
+    }
+
+    // Status-item hosting can intercept child NSButton tracking on newer macOS.
+    // Route from the actual screen-space tile rectangles before AppKit dispatches
+    // the event to that host, and consume both halves of the click.
+    private func routeLocalEvent(_ event: NSEvent, at screenPoint: NSPoint) -> NSEvent? {
+        if let window = statusContainer.window {
+            let group = window.convertToScreen(statusContainer.convert(statusContainer.bounds, to: nil))
+            if group.contains(screenPoint) {
+                if event.type == .leftMouseDown, !event.modifierFlags.contains(.command) {
+                    for metric in [Metric.cpu, .gpu, .memory] {
+                        guard let button = metricButtons[metric], !button.isHidden else { continue }
+                        let tile = window.convertToScreen(button.convert(button.bounds, to: nil))
+                        if tile.contains(screenPoint) {
+                            togglePopover(button)
+                            break
+                        }
+                    }
+                }
+                if event.modifierFlags.contains(.command) { return event }
+                return nil
+            }
+        }
+        if event.type != .leftMouseUp { closePopoversIfOutside(screenPoint) }
+        return event
     }
 
     private func closePopoversIfOutside(_ point: NSPoint) {
@@ -210,7 +236,7 @@ final class StatusBarController: NSObject {
             if !panel.frame.contains(point) {
                 panel.orderOut(nil)
                 store.hide(metric)
-            metricButtons[metric]?.state = .off
+                metricButtons[metric]?.state = .off
             }
         }
     }
