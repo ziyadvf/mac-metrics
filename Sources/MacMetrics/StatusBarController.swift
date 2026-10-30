@@ -8,7 +8,8 @@ final class StatusBarController: NSObject {
     private let store: MetricsStore
     private let settingsWindow: SettingsWindowController
     private let statusItem: NSStatusItem
-    private var statusSegments: [(metric: Metric, range: Range<CGFloat>)] = []
+    private let statusStack = NSStackView()
+    private var metricButtons: [Metric: NSButton] = [:]
     private var panels: [Metric: NSPanel] = [:]
     private var hostingControllers: [Metric: NSHostingController<MetricPopover>] = [:]
     private var refreshTimer: Timer?
@@ -22,8 +23,7 @@ final class StatusBarController: NSObject {
         self.settingsWindow = SettingsWindowController(preferences: preferences)
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
-        statusItem.button?.target = self
-        statusItem.button?.action = #selector(togglePopover(_:))
+        configureStatusItem()
         for metric in Metric.allCases {
             let hostingController = NSHostingController(rootView: MetricPopover(
                 metric: metric,
@@ -75,6 +75,9 @@ final class StatusBarController: NSObject {
             panel.orderOut(nil)
             store.hide(metric)
         }
+        rebuildStatusSegments()
+        updateStatusItemWidth()
+        refreshLabels()
         refreshLabels()
     }
 
@@ -106,35 +109,74 @@ final class StatusBarController: NSObject {
         let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
         let orderedMetrics: [Metric] = [.memory, .gpu, .cpu]
-        let visibleMetrics = orderedMetrics.filter(isMetricVisible)
-        let separator = "  ·  "
-        let separatorWidth = (separator as NSString).size(withAttributes: attributes).width
-        let title = NSMutableAttributedString(string: "")
-        var cursor: CGFloat = 0
-        var nextSegments: [(metric: Metric, range: Range<CGFloat>)] = []
-
-        for (index, metric) in visibleMetrics.enumerated() {
-            if index > 0 {
-                title.append(NSAttributedString(string: separator, attributes: attributes))
-                cursor += separatorWidth
-            }
+        for metric in orderedMetrics {
             let label = statusLabel(for: metric, snapshot: snapshot)
-            let width = (label as NSString).size(withAttributes: attributes).width
-            nextSegments.append((metric, max(0, cursor - 4)..<(cursor + width + 4)))
-            title.append(NSAttributedString(string: label, attributes: attributes))
-            cursor += width
+            metricButtons[metric]?.attributedTitle = NSAttributedString(string: label, attributes: attributes)
+            metricButtons[metric]?.setAccessibilityLabel("\(metric.rawValue) \(label.dropFirst().trimmingCharacters(in: .whitespaces))")
         }
 
-        statusSegments = nextSegments
-        statusItem.button?.attributedTitle = title
-        // Variable-length status items don’t always recalculate their width when
-        // only attributedTitle changes. Keep the full three-metric title visible.
-        statusItem.length = max(22, cursor + 16)
-        statusItem.button?.setAccessibilityLabel(visibleMetrics.map {
-            "\($0.rawValue) \(statusLabel(for: $0, snapshot: snapshot).dropFirst().trimmingCharacters(in: .whitespaces))"
-        }.joined(separator: ", "))
-        statusItem.button?.setAccessibilityHelp("Click a metric to view its details.")
+        updateStatusItemWidth()
         resizeVisiblePanels()
+    }
+
+    private func configureStatusItem() {
+        guard let button = statusItem.button else { return }
+        button.title = ""
+        button.attributedTitle = NSAttributedString(string: "")
+        button.target = nil
+        button.action = nil
+        button.isBordered = false
+        statusStack.orientation = .horizontal
+        statusStack.alignment = .centerY
+        statusStack.distribution = .fill
+        statusStack.spacing = 3
+        statusStack.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(statusStack)
+        NSLayoutConstraint.activate([
+            statusStack.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 8),
+            statusStack.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -8),
+            statusStack.centerYAnchor.constraint(equalTo: button.centerYAnchor)
+        ])
+
+        for metric in [Metric.memory, .gpu, .cpu] {
+            let metricButton = NSButton(title: "", target: self, action: #selector(togglePopover(_:)))
+            metricButton.tag = Metric.allCases.firstIndex(of: metric) ?? 0
+            metricButton.isBordered = false
+            metricButton.bezelStyle = .regularSquare
+            metricButton.alignment = .center
+            metricButton.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            metricButton.setContentHuggingPriority(.required, for: .horizontal)
+            metricButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+            metricButton.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
+            metricButtons[metric] = metricButton
+        }
+    }
+
+    private func rebuildStatusSegments() {
+        for view in statusStack.arrangedSubviews {
+            statusStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        let orderedMetrics: [Metric] = [.memory, .gpu, .cpu]
+        var hasPreviousSegment = false
+        for metric in orderedMetrics where isMetricVisible(metric) {
+            if hasPreviousSegment {
+                let separator = NSTextField(labelWithString: "·")
+                separator.font = .systemFont(ofSize: 11)
+                separator.textColor = .tertiaryLabelColor
+                statusStack.addArrangedSubview(separator)
+            }
+            if let button = metricButtons[metric] {
+                statusStack.addArrangedSubview(button)
+                hasPreviousSegment = true
+            }
+        }
+    }
+
+    private func updateStatusItemWidth() {
+        statusStack.layoutSubtreeIfNeeded()
+        statusItem.length = max(22, statusStack.fittingSize.width + 16)
     }
 
     private func statusLabel(for metric: Metric, snapshot: MetricSnapshot) -> String {
@@ -148,7 +190,7 @@ final class StatusBarController: NSObject {
 
     private func resizeVisiblePanels() {
         for (metric, panel) in panels where panel.isVisible {
-            guard let button = statusItem.button,
+            guard let button = metricButtons[metric],
                   let hostingController = hostingControllers[metric] else { continue }
             hostingController.view.layoutSubtreeIfNeeded()
             let measured = hostingController.sizeThatFits(in: NSSize(width: 340, height: 900))
@@ -191,10 +233,10 @@ final class StatusBarController: NSObject {
         }
     }
 
-    @objc private func togglePopover(_ sender: NSStatusBarButton) {
-        guard let metric = metric(at: sender, event: NSApp.currentEvent),
-              let button = statusItem.button,
-              let panel = panels[metric], let hostingController = hostingControllers[metric] else { return }
+    @objc private func togglePopover(_ sender: NSButton) {
+        guard Metric.allCases.indices.contains(sender.tag) else { return }
+        let metric = Metric.allCases[sender.tag]
+        guard let panel = panels[metric], let hostingController = hostingControllers[metric] else { return }
         for (otherMetric, otherPanel) in panels where otherMetric != metric && otherPanel.isVisible {
             otherPanel.orderOut(nil)
             store.hide(otherMetric)
@@ -208,31 +250,12 @@ final class StatusBarController: NSObject {
             let size = hostingController.sizeThatFits(in: NSSize(width: 340, height: 900))
             let height = max(210, size.height)
             panel.setContentSize(NSSize(width: 340, height: height))
-            position(panel, below: button)
+            position(panel, below: sender)
             panel.orderFront(nil)
         }
     }
 
-    private func metric(at button: NSStatusBarButton, event: NSEvent?) -> Metric? {
-        guard !statusSegments.isEmpty else { return nil }
-        guard let event else { return statusSegments.first?.metric }
-        let point = button.convert(event.locationInWindow, from: nil)
-        let titleOrigin = button.cell?.titleRect(forBounds: button.bounds).minX ?? 0
-        let titleX = point.x - titleOrigin
-        if let segment = statusSegments.first(where: { $0.range.contains(titleX) }) {
-            return segment.metric
-        }
-        return statusSegments.min { left, right in
-            distance(from: titleX, to: left.range) < distance(from: titleX, to: right.range)
-        }?.metric
-    }
-
-    private func distance(from point: CGFloat, to range: Range<CGFloat>) -> CGFloat {
-        if range.contains(point) { return 0 }
-        return min(abs(point - range.lowerBound), abs(point - range.upperBound))
-    }
-
-    private func position(_ panel: NSPanel, below button: NSStatusBarButton) {
+    private func position(_ panel: NSPanel, below button: NSView) {
         guard let window = button.window else { return }
         let anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
         let screen = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
