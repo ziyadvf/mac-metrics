@@ -12,6 +12,7 @@ struct MetricPopover: View {
         nonmutating set { store.searchQueries[metric] = newValue }
     }
     @State private var isScrolling = false
+    @State private var selectedRowFrame: CGRect = .null
     @State private var isAtTop = true
     @State private var isAtBottom = true
     @State private var settingsHovered = false
@@ -245,6 +246,13 @@ struct MetricPopover: View {
                             quit: { confirmQuit(process) }
                         )
                         .id(process.pid)
+                        .background {
+                            if selectedProcess == process.pid {
+                                GeometryReader { geometry in
+                                    Color.clear.preference(key: SelectedRowFrameKey.self, value: geometry.frame(in: .named("process-viewport")))
+                                }
+                            }
+                        }
                     }
                 }
                 .frame(width: 308)
@@ -259,6 +267,8 @@ struct MetricPopover: View {
                     }
                 }
             }
+            .coordinateSpace(name: "process-viewport")
+            .onPreferenceChange(SelectedRowFrameKey.self) { selectedRowFrame = $0 }
             .scrollIndicators(.automatic)
             .scrollTargetBehavior(.viewAligned)
             .frame(height: 266)
@@ -289,6 +299,7 @@ struct MetricPopover: View {
             }
             .onChange(of: isScrolling) { _, scrolling in
                 guard !scrolling, let pid = selectedProcess else { return }
+                guard selectedRowFrame.isNull || selectedRowFrame.minY < 8 || selectedRowFrame.maxY > 258 else { return }
                 updateProcesses(store.snapshot.processUsage[metric] ?? [])
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                     proxy.scrollTo(pid, anchor: .center)
@@ -297,6 +308,7 @@ struct MetricPopover: View {
             .onChange(of: displayedProcesses) { _, _ in
                 guard let pid = selectedProcess, !isScrolling,
                       filteredProcesses.contains(where: { $0.pid == pid }) else { return }
+                guard selectedRowFrame.isNull || selectedRowFrame.minY < 8 || selectedRowFrame.maxY > 258 else { return }
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                     proxy.scrollTo(pid, anchor: .center)
                 }
@@ -310,13 +322,11 @@ struct MetricPopover: View {
         let preserveOrder = selectedProcess == nil && (isScrolling || !isAtTop || hoveredProcess != nil)
         let next = ProcessListOrder.reconcile(current: displayedProcesses, incoming: incoming, preserveOrder: preserveOrder)
         guard next != displayedProcesses else { return }
-        if animate && !preserveOrder && !reduceMotion && !displayedProcesses.isEmpty {
-            withAnimation(.easeInOut(duration: 0.18)) { displayedProcesses = next }
-        } else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { displayedProcesses = next }
-        }
+        // Do not animate an entire process ranking every sample. Selection size,
+        // following, and loading transitions have their own scoped animations.
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) { displayedProcesses = next }
     }
 
     private var summaryDetail: String {
@@ -777,4 +787,9 @@ private struct LoadingShimmer: ViewModifier {
             content.transition(.opacity)
         }
     }
+}
+
+private struct SelectedRowFrameKey: PreferenceKey {
+    static let defaultValue: CGRect = .null
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }

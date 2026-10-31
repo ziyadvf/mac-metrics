@@ -57,12 +57,21 @@ final class AppPreferences: ObservableObject {
 }
 
 @MainActor
-final class SettingsWindowController {
+final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: AppPreferences
     private var window: NSWindow?
 
     init(preferences: AppPreferences) {
         self.preferences = preferences
+        super.init()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window, !window.isVisible else { return }
+            window.contentViewController = nil
+            self.window = nil
+        }
     }
 
     func show() {
@@ -76,6 +85,7 @@ final class SettingsWindowController {
                 backing: .buffered,
                 defer: false
             )
+            created.delegate = self
             created.title = "Settings"
             created.isReleasedWhenClosed = false
             created.contentMinSize = NSSize(width: 440, height: 490)

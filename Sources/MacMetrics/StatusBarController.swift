@@ -10,13 +10,14 @@ final class StatusBarController: NSObject {
     private var statusItems: [Metric: NSStatusItem] = [:]
     private var metricButtons: [Metric: NSButton] = [:]
     private var panels: [Metric: NSPanel] = [:]
-    private var hostingControllers: [Metric: NSHostingController<MetricPopover>] = [:]
+    private var hostingControllers: [Metric: NSHostingController<AnyView>] = [:]
     private var panelLayoutSignatures: [Metric: [Int]] = [:]
     private var observesSnapshots = false
     private var lastLabels: [Metric: String] = [:]
     private var subscriptions = Set<AnyCancellable>()
     private var localClickMonitor: Any?
     private var globalClickMonitor: Any?
+    private var idleTrim: DispatchWorkItem?
 
     init(preferences: AppPreferences) {
         self.preferences = preferences
@@ -31,12 +32,21 @@ final class StatusBarController: NSObject {
     }
 
     private func preparePanel(for metric: Metric) {
-        guard panels[metric] == nil else { return }
-            let hostingController = NSHostingController(rootView: MetricPopover(
+        idleTrim?.cancel()
+        let content = AnyView(MetricPopover(
+            metric: metric,
+            store: store,
+            openSettings: { [weak self] in self?.showSettings() }
+        ))
+        if let host = hostingControllers[metric] {
+            host.rootView = content
+            return
+        }
+            let hostingController = NSHostingController(rootView: AnyView(MetricPopover(
                 metric: metric,
                 store: store,
                 openSettings: { [weak self] in self?.showSettings() }
-            ))
+            )))
             let panel = MetricPanel(
                 contentRect: .zero,
                 styleMask: [.borderless, .nonactivatingPanel],
@@ -63,6 +73,27 @@ final class StatusBarController: NSObject {
             hostingControllers[metric] = hostingController
     }
 
+    private func dismissPanel(_ metric: Metric) {
+        panels[metric]?.orderOut(nil)
+        // Release the hosting graph and glass backing after the event completes.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let panel = self.panels[metric], !panel.isVisible else { return }
+            self.hostingControllers[metric]?.rootView = AnyView(EmptyView())
+            self.hostingControllers[metric]?.view.layoutSubtreeIfNeeded()
+            self.panelLayoutSignatures.removeValue(forKey: metric)
+            self.idleTrim?.cancel()
+            let trim = DispatchWorkItem { [weak self] in
+                guard let self, !self.panels.values.contains(where: \.isVisible) else { return }
+                DispatchQueue.global(qos: .background).async {
+                    // Return unused allocator pages after UI teardown, off the UI thread.
+                    _ = malloc_zone_pressure_relief(nil, 0)
+                }
+            }
+            self.idleTrim = trim
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: trim)
+        }
+    }
+
     private func bindPreferences() {
         preferences.$showsCPU.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
         preferences.$showsGPU.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.applyMetricVisibility() }.store(in: &subscriptions)
@@ -77,7 +108,7 @@ final class StatusBarController: NSObject {
         for metric in Metric.allCases { statusItems[metric]?.isVisible = isMetricVisible(metric) }
         for metric in Metric.allCases {
             guard !isMetricVisible(metric), let panel = panels[metric], panel.isVisible else { continue }
-            panel.orderOut(nil)
+            dismissPanel(metric)
             store.hide(metric)
             metricButtons[metric]?.state = .off
         }
@@ -103,7 +134,7 @@ final class StatusBarController: NSObject {
 
     private func showSettings() {
         for (metric, panel) in panels where panel.isVisible {
-            panel.orderOut(nil)
+            dismissPanel(metric)
             store.hide(metric)
             metricButtons[metric]?.state = .off
         }
@@ -189,7 +220,7 @@ final class StatusBarController: NSObject {
                 if !(self.store.searchQueries[metric] ?? "").isEmpty {
                     self.store.searchQueries[metric] = ""
                 } else {
-                    self.panels[metric]?.orderOut(nil)
+                    self.dismissPanel(metric)
                     self.store.hide(metric)
                     self.metricButtons[metric]?.state = .off
                 }
@@ -229,7 +260,7 @@ final class StatusBarController: NSObject {
 
         for (metric, panel) in panels where panel.isVisible {
             if !panel.frame.contains(point) {
-                panel.orderOut(nil)
+                dismissPanel(metric)
                 store.hide(metric)
                 metricButtons[metric]?.state = .off
             }
@@ -242,12 +273,12 @@ final class StatusBarController: NSObject {
         preparePanel(for: metric)
         guard let panel = panels[metric], let hostingController = hostingControllers[metric] else { return }
         for (otherMetric, otherPanel) in panels where otherMetric != metric && otherPanel.isVisible {
-            otherPanel.orderOut(nil)
+            dismissPanel(otherMetric)
             store.hide(otherMetric)
             metricButtons[otherMetric]?.state = .off
         }
         if panel.isVisible {
-            panel.orderOut(nil)
+            dismissPanel(metric)
             store.hide(metric)
             metricButtons[metric]?.state = .off
         } else {

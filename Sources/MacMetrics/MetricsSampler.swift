@@ -11,6 +11,11 @@ final class MetricsSampler: @unchecked Sendable {
         var gpuAvailable: Bool?
     }
     private var snapshot = MetricSnapshot()
+    private let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .memory
+        return formatter
+    }()
     private var activeMetric: Metric?
     private var keepsDetailsWarm = false
     private var selectedCPUPID: Int32?
@@ -21,6 +26,7 @@ final class MetricsSampler: @unchecked Sendable {
     private var gpuBaseline: [UInt64: (pid: Int32, time: UInt64)] = [:]
     private var gpuSampleTime: Double?
     private var previousProcesses: [Int32: UInt64] = [:]
+    private var processNames: [Int32: (seconds: UInt64, microseconds: UInt64, name: String)] = [:]
     private var previousProcessSample = ProcessInfo.processInfo.systemUptime
     private var previousProcessorTicks: [ProcessorTicks] = []
     private lazy var coreTypes = readCoreTypes()
@@ -56,13 +62,14 @@ final class MetricsSampler: @unchecked Sendable {
         if warm {
             sampleGPUProcesses()
             let start = ProcessInfo.processInfo.systemUptime
-            let processes = Self.readProcesses(includeFootprint: true)
+            let processes = readProcesses(includeFootprint: true)
             let now = (start + ProcessInfo.processInfo.systemUptime) / 2
             applyProcessSample(processes, sampledAt: now, for: .cpu)
             applyProcessSample(processes, sampledAt: now, for: .memory)
         } else {
             snapshot.processUsage.removeAll()
             previousProcesses.removeAll()
+            processNames.removeAll()
             gpuBaseline.removeAll()
             gpuSampleTime = nil
             splitCache.removeAll()
@@ -168,7 +175,7 @@ final class MetricsSampler: @unchecked Sendable {
             ranked = current.compactMap { process in
                 guard let footprint = process.footprint else { return nil }
                 let percent = Double(footprint) / Double(total) * 100
-                return (process.pid, process.name, percent, Self.formatBytes(footprint))
+                return (process.pid, process.name, percent, byteFormatter.string(fromByteCount: Int64(footprint)))
             }.sorted { $0.value == $1.value ? $0.pid < $1.pid : $0.value > $1.value }
         }
 
@@ -321,13 +328,16 @@ final class MetricsSampler: @unchecked Sendable {
         return nil
     }
 
-    private static func readProcesses(includeFootprint: Bool) -> [(pid: Int32, name: String, cpuAbsoluteTime: UInt64, footprint: UInt64?)] {
+    private func readProcesses(includeFootprint: Bool) -> [(pid: Int32, name: String, cpuAbsoluteTime: UInt64, footprint: UInt64?)] {
         let byteCount = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
         guard byteCount > 0 else { return [] }
         var pids = [pid_t](repeating: 0, count: Int(byteCount) / MemoryLayout<pid_t>.size + 16)
         let actual = pids.withUnsafeMutableBytes { proc_listpids(UInt32(PROC_ALL_PIDS), 0, $0.baseAddress, Int32($0.count)) }
         guard actual > 0 else { return [] }
-        return pids.prefix(Int(actual) / MemoryLayout<pid_t>.size).compactMap { pid in
+        let livePIDs = pids.prefix(Int(actual) / MemoryLayout<pid_t>.size)
+        let live = Set(livePIDs)
+        processNames = processNames.filter { live.contains($0.key) }
+        return livePIDs.compactMap { pid in
             guard pid > 0 else { return nil }
             var identity = proc_bsdinfo()
             let identitySize = Int32(MemoryLayout<proc_bsdinfo>.size)
@@ -340,9 +350,18 @@ final class MetricsSampler: @unchecked Sendable {
                 }
             }
             guard status == 0 else { return nil }
-            var nameBuffer = [CChar](repeating: 0, count: 256)
-            guard proc_name(pid, &nameBuffer, UInt32(nameBuffer.count)) > 0 else { return nil }
-            let name = String(decoding: nameBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            let seconds = UInt64(identity.pbi_start_tvsec)
+            let microseconds = UInt64(identity.pbi_start_tvusec)
+            let name: String
+            if let cached = processNames[pid], cached.seconds == seconds, cached.microseconds == microseconds {
+                name = cached.name
+            } else {
+                previousProcesses.removeValue(forKey: pid)
+                var nameBuffer = [CChar](repeating: 0, count: 256)
+                guard proc_name(pid, &nameBuffer, UInt32(nameBuffer.count)) > 0 else { return nil }
+                name = String(decoding: nameBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+                processNames[pid] = (seconds, microseconds, name)
+            }
             let footprint: UInt64? = includeFootprint ? usage.ri_phys_footprint : nil
             return (pid, name, usage.ri_user_time + usage.ri_system_time, footprint)
         }
