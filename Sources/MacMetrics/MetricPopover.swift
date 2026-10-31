@@ -107,11 +107,10 @@ struct MetricPopover: View {
             .focusEffectDisabled()
             .onHover { settingsHovered = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: settingsHovered)
-            .padding(.top, 2)
         }
         .padding(.horizontal, 16)
         .padding(.top, 15)
-        .padding(.bottom, 10)
+        .padding(.bottom, 8)
         .frame(width: 340, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .modifier(MenuBarGlassSurface())
@@ -183,10 +182,7 @@ struct MetricPopover: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.tertiary)
-            TextField("Search processes", text: Binding(get: { search }, set: { search = $0 }))
-                .textFieldStyle(.plain)
-                .focusEffectDisabled()
-                .background(SearchFocusRingSuppressor().frame(width: 0, height: 0))
+            ProcessSearchField(text: Binding(get: { search }, set: { search = $0 }))
                 .accessibilityLabel("Search processes by name or PID")
             if !search.isEmpty {
                 Button { search = "" } label: {
@@ -247,7 +243,7 @@ struct MetricPopover: View {
                     }
                 }
             }
-            .scrollIndicators(.automatic)
+            .scrollIndicators(.hidden)
             .scrollTargetBehavior(.viewAligned)
             .frame(height: 266)
             .mask {
@@ -502,33 +498,40 @@ private final class ProcessScrollProbe: NSView {
 
 // SwiftUI's plain field can still inherit an AppKit focus ring. Suppress only
 // the decoration; keep the native field, keyboard focus, and accessibility.
-private struct SearchFocusRingSuppressor: NSViewRepresentable {
-    func makeNSView(context: Context) -> SearchFocusRingProbe { SearchFocusRingProbe() }
-    func updateNSView(_ view: SearchFocusRingProbe, context: Context) {
-        DispatchQueue.main.async { [weak view] in view?.removeFocusRing() }
+private struct ProcessSearchField: NSViewRepresentable {
+    @Binding var text: String
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    func makeNSView(context: Context) -> NSTextField {
+        let field = SearchTextField()
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 12)
+        field.placeholderString = "Search processes"
+        field.delegate = context.coordinator
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return field
+    }
+    func updateNSView(_ field: NSTextField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+    }
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text.wrappedValue = field.stringValue
+        }
     }
 }
 
-private final class SearchFocusRingProbe: NSView {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        DispatchQueue.main.async { [weak self] in self?.removeFocusRing() }
-    }
-    func removeFocusRing() {
-        func findField(_ view: NSView) -> NSTextField? {
-            if let field = view as? NSTextField, field.isEditable { return field }
-            for child in view.subviews {
-                if let field = findField(child) { return field }
-            }
-            return nil
-        }
-        var ancestor = superview
-        while let view = ancestor {
-            if let field = findField(view) { field.focusRingType = .none; return }
-            if view === window?.contentView { break }
-            ancestor = view.superview
-        }
+private final class SearchTextField: NSTextField {
+    override func mouseDown(with event: NSEvent) {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKey()
+        super.mouseDown(with: event)
+        (currentEditor() as? NSTextView)?.insertionPointColor = .labelColor
     }
 }
 
