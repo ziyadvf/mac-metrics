@@ -24,7 +24,14 @@ final class StatusBarController: NSObject {
         self.settingsWindow = SettingsWindowController(preferences: preferences)
         super.init()
         configureStatusItem()
-        for metric in Metric.allCases {
+        bindPreferences()
+        applyMetricVisibility()
+        installOutsideClickMonitors()
+        scheduleLabelRefresh()
+    }
+
+    private func preparePanel(for metric: Metric) {
+        guard panels[metric] == nil else { return }
             let hostingController = NSHostingController(rootView: MetricPopover(
                 metric: metric,
                 store: store,
@@ -54,11 +61,6 @@ final class StatusBarController: NSObject {
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
             panels[metric] = panel
             hostingControllers[metric] = hostingController
-        }
-        bindPreferences()
-        applyMetricVisibility()
-        installOutsideClickMonitors()
-        scheduleLabelRefresh()
     }
 
     private func bindPreferences() {
@@ -131,7 +133,7 @@ final class StatusBarController: NSObject {
         // button and highlight. Creating them consecutively keeps the initial
         // layout adjacent; macOS owns their subsequent positioning.
         for metric in [Metric.memory, .gpu, .cpu] {
-            let item = NSStatusBar.system.statusItem(withLength: 49)
+            let item = NSStatusBar.system.statusItem(withLength: 45)
             item.autosaveName = "MacMetrics.\(metric.rawValue)"
             guard let button = item.button else { continue }
             button.target = self
@@ -154,9 +156,9 @@ final class StatusBarController: NSObject {
         case .gpu: prefix = "G"; value = snapshot.gpuPercent
         case .memory: prefix = "R"; value = snapshot.memoryPercent
         }
-        guard let value else { return "\(prefix)\u{2007}\u{2007}–%" }
+        guard let value else { return "\(prefix)\u{2009}–%" }
         let digits = String(format: "%.0f", min(100, max(0, value)))
-        return prefix + String(repeating: "\u{2007}", count: max(0, 3 - digits.count)) + digits + "%"
+        return prefix + "\u{2009}" + digits + "%"
     }
 
     private func resizeVisiblePanels() {
@@ -237,6 +239,7 @@ final class StatusBarController: NSObject {
     @objc private func togglePopover(_ sender: NSButton) {
         guard Metric.allCases.indices.contains(sender.tag) else { return }
         let metric = Metric.allCases[sender.tag]
+        preparePanel(for: metric)
         guard let panel = panels[metric], let hostingController = hostingControllers[metric] else { return }
         for (otherMetric, otherPanel) in panels where otherMetric != metric && otherPanel.isVisible {
             otherPanel.orderOut(nil)

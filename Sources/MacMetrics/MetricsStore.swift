@@ -187,6 +187,7 @@ final class MetricsStore: ObservableObject {
         let icon = applicationIcon ?? processApplicationBundlePath(for: pid).map {
             NSWorkspace.shared.icon(forFile: $0)
         }
+        if processIcons.count >= 64 { processIcons.removeAll(keepingCapacity: true) }
         processIcons[pid] = icon
         return icon
     }

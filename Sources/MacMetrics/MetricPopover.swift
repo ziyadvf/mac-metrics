@@ -4,8 +4,6 @@ struct MetricPopover: View {
     let metric: Metric
     @ObservedObject var store: MetricsStore
     let openSettings: () -> Void
-    @State private var processToQuit: ProcessUsage?
-    @State private var showTerminationFailure = false
     @State private var hoveredProcess: Int32?
     @State private var selectedProcess: Int32?
     @State private var displayedProcesses: [ProcessUsage] = []
@@ -60,6 +58,7 @@ struct MetricPopover: View {
             if metric == .cpu {
                 cpuCoreUsage
                     .modifier(LoadingShimmer(loading: store.snapshot.cpuCoreGroups.isEmpty))
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: store.snapshot.cpuCoreGroups.isEmpty)
             }
 
             HStack(alignment: .firstTextBaseline) {
@@ -126,24 +125,24 @@ struct MetricPopover: View {
         .onChange(of: isAtTop) { _, atTop in
             if atTop && !isScrolling { updateProcesses(store.snapshot.processUsage[metric] ?? []) }
         }
-        .confirmationDialog(
-            "Force quit \(processToQuit?.name ?? "process")?",
-            isPresented: Binding(get: { processToQuit != nil }, set: { if !$0 { processToQuit = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Force Quit", role: .destructive) {
-                if let processToQuit { store.forceQuit(processToQuit) }
-                processToQuit = nil
-                if store.terminationFailure != nil { showTerminationFailure = true }
-            }
-            Button("Cancel", role: .cancel) { processToQuit = nil }
-        } message: {
-            Text("Any unsaved work in this process will be lost.")
-        }
-        .alert("Couldn’t quit process", isPresented: $showTerminationFailure) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(store.terminationFailure ?? "Try again.")
+    }
+
+    private func confirmQuit(_ process: ProcessUsage) {
+        let alert = NSAlert()
+        alert.messageText = "Force quit \(process.name)?"
+        alert.informativeText = "Any unsaved work in this process will be lost."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Force Quit")
+        alert.buttons.last?.hasDestructiveAction = true
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        store.forceQuit(process)
+        if let failure = store.terminationFailure {
+            let error = NSAlert()
+            error.messageText = "Couldn’t quit process"
+            error.informativeText = failure
+            error.runModal()
         }
     }
 
@@ -219,6 +218,7 @@ struct MetricPopover: View {
                                     selected: false, select: {}, loadIcon: { nil }, hoverChanged: { _ in }, quit: {}
                                 )
                                 .modifier(LoadingShimmer(loading: true))
+                                .transition(.opacity)
                                 .allowsHitTesting(false)
                                 .accessibilityHidden(true)
                             }
@@ -241,7 +241,7 @@ struct MetricPopover: View {
                                 if hovering { hoveredProcess = process.pid }
                                 else if hoveredProcess == process.pid { hoveredProcess = nil }
                             },
-                            quit: { processToQuit = process }
+                            quit: { confirmQuit(process) }
                         )
                         .id(process.pid)
                     }
@@ -277,6 +277,7 @@ struct MetricPopover: View {
             .onChange(of: search) { _, _ in
                 proxy.scrollTo("process-list-top", anchor: .top)
             }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: displayedProcesses.isEmpty)
             .onChange(of: selectedProcess) { _, pid in
                 guard let pid else { return }
                 updateProcesses(store.snapshot.processUsage[metric] ?? [])
@@ -720,7 +721,7 @@ private struct LoadingShimmer: ViewModifier {
                 } animation: { phase in phase ? .easeInOut(duration: 1.8) : .linear(duration: 0) }
                 .accessibilityLabel("Loading")
         } else {
-            content
+            content.transition(.opacity)
         }
     }
 }
