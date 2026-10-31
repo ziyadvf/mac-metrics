@@ -256,6 +256,7 @@ struct MetricPopover: View {
                 .padding(.top, 2)
                 .padding(.bottom, 6)
                 .background {
+                    OverlayScrollerConfiguration()
                     if #unavailable(macOS 15.0) {
                         ProcessScrollObserver(scrolling: { isScrolling = $0 }, atTop: { isAtTop = $0 }, atBottom: { isAtBottom = $0 })
                     }
@@ -449,6 +450,26 @@ private extension View {
                 } action: { _, edges in edgesChanged(edges) }
         } else {
             self
+        }
+    }
+}
+
+// Keep system scrollbar preferences from reserving space on just one side.
+private struct OverlayScrollerConfiguration: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) {
+        DispatchQueue.main.async { [weak view] in view?.configure() }
+    }
+    final class Probe: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in self?.configure() }
+        }
+        func configure() {
+            guard let scroll = enclosingScrollView else { return }
+            if scroll.scrollerStyle != .overlay { scroll.scrollerStyle = .overlay }
+            scroll.autohidesScrollers = true
         }
     }
 }
