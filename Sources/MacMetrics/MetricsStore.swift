@@ -178,8 +178,9 @@ final class MetricsStore: ObservableObject {
         warmUntil = ProcessInfo.processInfo.systemUptime + warmDuration
         scheduleRefreshTimer()
         idleCleanupTask?.cancel()
+        let retention = warmDuration
         idleCleanupTask = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(warmDuration)) } catch { return }
+            do { try await Task.sleep(for: .seconds(retention)) } catch { return }
             guard let self, self.activeMetric == nil else { return }
             self.previousProcesses.removeAll()
             self.processIcons.removeAll()
