@@ -29,6 +29,12 @@ struct MetricPopover: View {
     private var hasValue: Bool { metric != .gpu || store.snapshot.gpuPercent != nil }
 
     var body: some View {
+        Group {
+            if store.activeMetric == metric { panelContent }
+        }
+    }
+
+    private var panelContent: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
             metricSummary

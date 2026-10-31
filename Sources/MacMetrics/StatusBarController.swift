@@ -12,7 +12,8 @@ final class StatusBarController: NSObject {
     private var panels: [Metric: NSPanel] = [:]
     private var hostingControllers: [Metric: NSHostingController<MetricPopover>] = [:]
     private var panelLayoutSignatures: [Metric: [Int]] = [:]
-    private var refreshTimer: Timer?
+    private var observesSnapshots = false
+    private var lastLabels: [Metric: String] = [:]
     private var subscriptions = Set<AnyCancellable>()
     private var localClickMonitor: Any?
     private var globalClickMonitor: Any?
@@ -90,10 +91,12 @@ final class StatusBarController: NSObject {
     }
 
     private func scheduleLabelRefresh(interval: TimeInterval? = nil) {
-        refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: interval ?? preferences.refreshInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshLabels() }
-        }
+        guard !observesSnapshots else { return }
+        observesSnapshots = true
+        // The sampling timer is the sole clock. Deliver after its snapshot commit.
+        store.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
+            self?.refreshLabels()
+        }.store(in: &subscriptions)
     }
 
     private func showSettings() {
@@ -112,6 +115,8 @@ final class StatusBarController: NSObject {
         let orderedMetrics: [Metric] = [.memory, .gpu, .cpu]
         for metric in orderedMetrics {
             let label = statusLabel(for: metric, snapshot: snapshot)
+            guard lastLabels[metric] != label else { continue }
+            lastLabels[metric] = label
             metricButtons[metric]?.attributedTitle = NSAttributedString(string: label, attributes: attributes)
             let accessibleValue = metric == .gpu && snapshot.gpuPercent == nil
                 ? "unavailable" : String(label.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)

@@ -5,7 +5,15 @@ import IOKit
 @MainActor
 final class MetricsStore: ObservableObject {
     @Published var searchQueries: [Metric: String] = [:]
-    @Published private(set) var snapshot = MetricSnapshot()
+    private var snapshotStorage = MetricSnapshot()
+    private var batchingSnapshot = false
+    private(set) var snapshot: MetricSnapshot {
+        get { snapshotStorage }
+        set {
+            if !batchingSnapshot { objectWillChange.send() }
+            snapshotStorage = newValue
+        }
+    }
     @Published private(set) var activeMetric: Metric?
     @Published private(set) var terminationFailure: String?
 
@@ -49,6 +57,7 @@ final class MetricsStore: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+        timer?.tolerance = min(0.5, refreshInterval * 0.2)
     }
 
     func show(_ metric: Metric) {
@@ -194,6 +203,9 @@ final class MetricsStore: ObservableObject {
     }
 
     private func refresh() {
+        objectWillChange.send()
+        batchingSnapshot = true
+        defer { batchingSnapshot = false }
         snapshot.cpuPercent = readSystemCPU()
         let memory = readMemory()
         snapshot.memoryUsed = memory.used
@@ -266,7 +278,7 @@ final class MetricsStore: ObservableObject {
         }
 
         previousProcessorTicks = currentTicks
-        snapshot.cpuCoreGroups = makeCoreGroups(from: perCoreUsage)
+        if activeMetric == .cpu { snapshot.cpuCoreGroups = makeCoreGroups(from: perCoreUsage) }
         return totalTicks == 0 ? snapshot.cpuPercent : Double(totalBusy) / Double(totalTicks) * 100
     }
 
