@@ -32,6 +32,7 @@ final class MetricsStore: ObservableObject {
     private var processIcons: [Int32: NSImage?] = [:]
     private var previousProcessSample = ProcessInfo.processInfo.systemUptime
     private lazy var coreTypes = readCoreTypes()
+    var coreLayout: [CPUCoreGroup] { makeCoreGroups(from: Array(repeating: 0, count: logicalCoreCount)) }
 
     private struct ProcessorTicks {
         let user: UInt32
@@ -54,22 +55,26 @@ final class MetricsStore: ObservableObject {
     }
 
     private func scheduleRefreshTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
+        timer?.invalidate()
+        let interval = activeMetric == nil ? max(5, refreshInterval) : max(3, refreshInterval)
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        timer?.tolerance = min(0.5, refreshInterval * 0.2)
+        timer?.tolerance = min(1, interval * 0.2)
     }
 
     func show(_ metric: Metric) {
         idleCleanupTask?.cancel()
         idleCleanupTask = nil
         activeMetric = metric
-        refreshProcesses(for: metric)
+        scheduleRefreshTimer()
+        refresh()
     }
 
     func hide(_ metric: Metric) {
         guard activeMetric == metric else { return }
         activeMetric = nil
+        scheduleRefreshTimer()
         idleCleanupTask?.cancel()
         idleCleanupTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(60)) } catch { return }
@@ -345,10 +350,7 @@ final class MetricsStore: ObservableObject {
         var service = IOIteratorNext(iterator)
         while service != 0 {
             defer { IOObjectRelease(service) }
-            var properties: Unmanaged<CFMutableDictionary>?
-            guard IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
-                  let dict = properties?.takeRetainedValue() as? [String: Any],
-                  let stats = dict["PerformanceStatistics"] as? [String: Any] else {
+            guard let stats = IORegistryEntryCreateCFProperty(service, "PerformanceStatistics" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any] else {
                 service = IOIteratorNext(iterator)
                 continue
             }

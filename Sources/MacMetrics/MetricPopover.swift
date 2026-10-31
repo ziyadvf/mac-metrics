@@ -58,21 +58,8 @@ struct MetricPopover: View {
             }
 
             if metric == .cpu {
-                if store.snapshot.cpuCoreGroups.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("CPU cores").font(.system(size: 12, weight: .semibold))
-                        HStack(spacing: 8) {
-                            ForEach(0..<min(8, ProcessInfo.processInfo.processorCount), id: \.self) { _ in
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.primary.opacity(0.10))
-                                    .frame(height: 22)
-                            }
-                        }
-                    }
-                    .accessibilityLabel("Loading CPU cores")
-                } else {
-                    cpuCoreUsage
-                }
+                cpuCoreUsage
+                    .modifier(LoadingShimmer(loading: store.snapshot.cpuCoreGroups.isEmpty))
             }
 
             HStack(alignment: .firstTextBaseline) {
@@ -224,14 +211,22 @@ struct MetricPopover: View {
                 LazyVStack(spacing: 2) {
                     Color.clear.frame(height: 0).id("process-list-top")
                     if filteredProcesses.isEmpty {
-                        VStack(spacing: 6) {
-                            Image(systemName: search.isEmpty ? "app.dashed" : "magnifyingglass")
-                                .font(.system(size: 20))
-                            Text(search.isEmpty ? (metric == .cpu ? "Measuring CPU usage…" : "No process data available") : "No matching processes")
-                                .font(.system(size: 12))
+                        if search.isEmpty {
+                            ForEach(0..<5) { index in
+                                ProcessRow(
+                                    process: ProcessUsage(pid: Int32(-index - 1), name: "Application name", value: 0, detail: metric == .cpu ? "0.0%" : "100.0 MB", icon: nil),
+                                    rank: index + 1, metric: metric, isScrolling: true,
+                                    selected: false, select: {}, loadIcon: { nil }, hoverChanged: { _ in }, quit: {}
+                                )
+                                .modifier(LoadingShimmer(loading: true))
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                            }
+                        } else {
+                            Text("No matching processes")
+                                .font(.system(size: 12)).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 120)
                         }
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 120)
                     }
                     ForEach(Array(filteredProcesses.enumerated()), id: \.element.id) { index, process in
                         ProcessRow(
@@ -251,6 +246,7 @@ struct MetricPopover: View {
                         .id(process.pid)
                     }
                 }
+                .frame(width: 308)
                 .padding(.horizontal, 16)
                 .scrollTargetLayout()
                 .padding(.top, 2)
@@ -324,7 +320,7 @@ struct MetricPopover: View {
 
     private var cpuCoreUsage: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(store.snapshot.cpuCoreGroups.enumerated()), id: \.element.id) { groupIndex, group in
+            ForEach(Array((store.snapshot.cpuCoreGroups.isEmpty ? store.coreLayout : store.snapshot.cpuCoreGroups).enumerated()), id: \.element.id) { groupIndex, group in
                 if groupIndex > 0 { Divider() }
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
@@ -697,6 +693,34 @@ private struct MenuBarGlassSurface: ViewModifier {
             content
                 .background(.regularMaterial, in: shape)
                 .clipShape(shape)
+        }
+    }
+}
+
+private struct LoadingShimmer: ViewModifier {
+    let loading: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View {
+        if loading {
+            content
+                .redacted(reason: .placeholder)
+                .phaseAnimator(reduceMotion ? [false] : [false, true]) { view, phase in
+                    view.opacity(0.55)
+                        .overlay {
+                            if !reduceMotion {
+                                GeometryReader { geometry in
+                                    LinearGradient(colors: [.clear, .white.opacity(0.22), .clear], startPoint: .leading, endPoint: .trailing)
+                                        .frame(width: geometry.size.width * 0.6)
+                                        .offset(x: phase ? geometry.size.width : -geometry.size.width * 0.6)
+                                }
+                                .mask(content.redacted(reason: .placeholder))
+                                .allowsHitTesting(false)
+                            }
+                        }
+                } animation: { phase in phase ? .easeInOut(duration: 1.8) : .linear(duration: 0) }
+                .accessibilityLabel("Loading")
+        } else {
+            content
         }
     }
 }
