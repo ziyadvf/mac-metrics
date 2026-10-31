@@ -29,7 +29,8 @@ struct MetricPopover: View {
     private var hasValue: Bool { metric != .gpu || store.snapshot.gpuPercent != nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
             metricSummary
 
             if metric == .memory {
@@ -90,28 +91,33 @@ struct MetricPopover: View {
                 processList
             }
 
-            Divider().padding(.top, metric == .gpu ? 2 : -8)
-            Button(action: openSettings) {
-                HStack {
-                    Label("Settings…", systemImage: "gearshape")
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .medium))
-                }
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.primary.opacity(settingsHovered ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 6))
             }
-            .buttonStyle(.plain)
-            .focusEffectDisabled()
-            .padding(.horizontal, -8)
-            .onHover { settingsHovered = $0 }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: settingsHovered)
+            .padding(.horizontal, 16)
+            .padding(.top, 15)
+
+            VStack(spacing: 0) {
+                Divider().padding(.horizontal, 16)
+                Button(action: openSettings) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "gearshape")
+                        Text("Settings…")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .frame(height: 32)
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
+                    .background(Color.primary.opacity(settingsHovered ? 0.055 : 0), in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .focusEffectDisabled()
+                .onHover { settingsHovered = $0 }
+                .padding(8)
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 15)
-        .padding(.bottom, 8)
         .frame(width: 340, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .modifier(MenuBarGlassSurface())
