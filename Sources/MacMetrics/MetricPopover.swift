@@ -287,6 +287,13 @@ struct MetricPopover: View {
                     proxy.scrollTo(pid, anchor: .center)
                 }
             }
+            .onChange(of: isScrolling) { _, scrolling in
+                guard !scrolling, let pid = selectedProcess else { return }
+                updateProcesses(store.snapshot.processUsage[metric] ?? [])
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(pid, anchor: .center)
+                }
+            }
             .onChange(of: displayedProcesses) { _, _ in
                 guard let pid = selectedProcess, !isScrolling,
                       filteredProcesses.contains(where: { $0.pid == pid }) else { return }
@@ -300,7 +307,7 @@ struct MetricPopover: View {
     }
 
     private func updateProcesses(_ incoming: [ProcessUsage], animate: Bool = true) {
-        let preserveOrder = isScrolling || (selectedProcess == nil && (!isAtTop || hoveredProcess != nil))
+        let preserveOrder = selectedProcess == nil && (isScrolling || !isAtTop || hoveredProcess != nil)
         let next = ProcessListOrder.reconcile(current: displayedProcesses, incoming: incoming, preserveOrder: preserveOrder)
         guard next != displayedProcesses else { return }
         if animate && !preserveOrder && !reduceMotion && !displayedProcesses.isEmpty {
