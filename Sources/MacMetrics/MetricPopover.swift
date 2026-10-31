@@ -105,6 +105,7 @@ struct MetricPopover: View {
             }
             .buttonStyle(.plain)
             .focusEffectDisabled()
+            .padding(.horizontal, -8)
             .onHover { settingsHovered = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: settingsHovered)
         }
