@@ -119,7 +119,7 @@ final class StatusBarController: NSObject {
         // button and highlight. Creating them consecutively keeps the initial
         // layout adjacent; macOS owns their subsequent positioning.
         for metric in [Metric.memory, .gpu, .cpu] {
-            let item = NSStatusBar.system.statusItem(withLength: 66)
+            let item = NSStatusBar.system.statusItem(withLength: 62)
             item.autosaveName = "MacMetrics.\(metric.rawValue)"
             guard let button = item.button else { continue }
             button.target = self
@@ -134,10 +134,10 @@ final class StatusBarController: NSObject {
 
     private func statusLabel(for metric: Metric, snapshot: MetricSnapshot) -> String {
         switch metric {
-        case .memory: String(format: "RAM %3.0f%%", snapshot.memoryPercent)
+        case .memory: String(format: "RAM\u{2009}%3.0f%%", snapshot.memoryPercent)
         case .gpu:
-            snapshot.gpuPercent.map { String(format: "GPU %3.0f%%", $0) } ?? "GPU  —%"
-        case .cpu: String(format: "CPU %3.0f%%", snapshot.cpuPercent)
+            snapshot.gpuPercent.map { String(format: "GPU\u{2009}%3.0f%%", $0) } ?? "GPU\u{2009}  —%"
+        case .cpu: String(format: "CPU\u{2009}%3.0f%%", snapshot.cpuPercent)
         }
     }
 
