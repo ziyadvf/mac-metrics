@@ -18,7 +18,19 @@ final class MetricsStore: ObservableObject {
     @Published private(set) var terminationFailure: String?
 
     @Published private(set) var selectedCPUDetail: (performance: Double, efficiency: Double)?
-    var selectedCPUPID: Int32? { didSet { cpuDetailBaseline = nil; selectedCPUDetail = nil; sampleSelectedCPU() } }
+    private var splitCache: [Int32: (start: UInt64, performance: Double, efficiency: Double, time: Double)] = [:]
+    var selectedCPUPID: Int32? {
+        didSet {
+            cpuDetailBaseline = nil
+            selectedCPUDetail = nil
+            sampleSelectedCPU()
+        }
+    }
+    private var engagement: Double = 0
+    private var lastOpen: Double?
+    private var warmUntil: Double = 0
+    private var warmDuration: Double = 60
+    private var keepsDetailsWarm: Bool { activeMetric != nil || ProcessInfo.processInfo.systemUptime < warmUntil }
     private var cpuDetailBaseline: (pid: Int32, start: UInt64, total: UInt64, performance: UInt64, time: Double)?
     private var gpuBaseline: [UInt64: (pid: Int32, time: UInt64)] = [:]
     @Published private(set) var gpuAttributionAvailable: Bool?
@@ -34,6 +46,10 @@ final class MetricsStore: ObservableObject {
         }
         guard result == 0 else { selectedCPUDetail = nil; cpuDetailBaseline = nil; return }
         let now = ProcessInfo.processInfo.systemUptime
+        if cpuDetailBaseline == nil, let cached = splitCache[pid],
+           cached.start == usage.ri_proc_start_abstime, now - cached.time <= 10 {
+            selectedCPUDetail = (cached.performance, cached.efficiency)
+        }
         let total = usage.ri_user_time + usage.ri_system_time
         let performance = usage.ri_user_ptime + usage.ri_system_ptime
         defer { cpuDetailBaseline = (pid, usage.ri_proc_start_abstime, total, performance, now) }
@@ -42,7 +58,10 @@ final class MetricsStore: ObservableObject {
         let scale = cpuNanosecondsPerTick * 100 / (max(0.001, now - prior.time) * 1_000_000_000 * Double(logicalCoreCount))
         let delta = total - prior.total
         let p = min(delta, performance - prior.performance)
-        selectedCPUDetail = (Double(p) * scale, Double(delta - p) * scale)
+        let detail = (Double(p) * scale, Double(delta - p) * scale)
+        selectedCPUDetail = detail
+        splitCache = splitCache.filter { now - $0.value.time <= 10 }
+        splitCache[pid] = (usage.ri_proc_start_abstime, detail.0, detail.1, now)
     }
 
     private func sampleGPUProcesses() {
@@ -142,6 +161,11 @@ final class MetricsStore: ObservableObject {
     func show(_ metric: Metric) {
         idleCleanupTask?.cancel()
         idleCleanupTask = nil
+        let now = ProcessInfo.processInfo.systemUptime
+        if let lastOpen { engagement *= exp(-(now - lastOpen) / 120) }
+        engagement = min(6, engagement + 1)
+        lastOpen = now
+        warmDuration = min(300, 30 + engagement * 30)
         activeMetric = metric
         scheduleRefreshTimer()
         refresh()
@@ -151,16 +175,18 @@ final class MetricsStore: ObservableObject {
         guard activeMetric == metric else { return }
         activeMetric = nil
         selectedCPUPID = nil
-        gpuBaseline.removeAll()
-        gpuSampleTime = nil
+        warmUntil = ProcessInfo.processInfo.systemUptime + warmDuration
         scheduleRefreshTimer()
         idleCleanupTask?.cancel()
         idleCleanupTask = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            do { try await Task.sleep(for: .seconds(warmDuration)) } catch { return }
             guard let self, self.activeMetric == nil else { return }
             self.previousProcesses.removeAll()
             self.processIcons.removeAll()
             self.snapshot.processUsage.removeAll()
+            self.gpuBaseline.removeAll()
+            self.gpuSampleTime = nil
+            self.splitCache.removeAll()
         }
     }
 
@@ -196,21 +222,19 @@ final class MetricsStore: ObservableObject {
     }
 
     func refreshProcesses(for metric: Metric) {
-        guard activeMetric == metric, metric != .gpu, processSamplingTask == nil else { return }
+        guard keepsDetailsWarm, processSamplingTask == nil else { return }
         processSamplingTask = Task { [weak self] in
             let sample = await Task.detached(priority: .utility) {
                 let start = ProcessInfo.processInfo.systemUptime
-                let values = Self.readProcesses(includeFootprint: metric == .memory)
+                let values = Self.readProcesses(includeFootprint: true)
                 let timestamp = (start + ProcessInfo.processInfo.systemUptime) / 2
                 return (timestamp, values)
             }.value
             guard let self else { return }
             self.processSamplingTask = nil
-            guard self.activeMetric == metric else {
-                if let active = self.activeMetric { self.refreshProcesses(for: active) }
-                return
-            }
-            self.applyProcessSample(sample.1, sampledAt: sample.0, for: metric)
+            guard self.keepsDetailsWarm else { return }
+            self.applyProcessSample(sample.1, sampledAt: sample.0, for: .cpu)
+            self.applyProcessSample(sample.1, sampledAt: sample.0, for: .memory)
         }
     }
 
@@ -253,8 +277,10 @@ final class MetricsStore: ObservableObject {
             )
         }
 
-        previousProcesses = Dictionary(uniqueKeysWithValues: current.map { ($0.pid, $0.cpuAbsoluteTime) })
-        previousProcessSample = now
+        if metric == .cpu {
+            previousProcesses = Dictionary(uniqueKeysWithValues: current.map { ($0.pid, $0.cpuAbsoluteTime) })
+            previousProcessSample = now
+        }
         snapshot.processUsage[metric] = usage
     }
 
@@ -308,8 +334,10 @@ final class MetricsStore: ObservableObject {
         snapshot.gpuPercent = readGPUUtilization()
         snapshot.updatedAt = Date()
         sampleSelectedCPU()
-        if activeMetric == .gpu { sampleGPUProcesses() }
-        if let activeMetric, activeMetric != .gpu { refreshProcesses(for: activeMetric) }
+        if keepsDetailsWarm {
+            sampleGPUProcesses()
+            refreshProcesses(for: activeMetric ?? .cpu)
+        }
     }
 
     private func readSystemCPU() -> Double {
@@ -365,7 +393,7 @@ final class MetricsStore: ObservableObject {
         }
 
         previousProcessorTicks = currentTicks
-        if activeMetric == .cpu { snapshot.cpuCoreGroups = makeCoreGroups(from: perCoreUsage) }
+        if keepsDetailsWarm { snapshot.cpuCoreGroups = makeCoreGroups(from: perCoreUsage) }
         return totalTicks == 0 ? snapshot.cpuPercent : Double(totalBusy) / Double(totalTicks) * 100
     }
 

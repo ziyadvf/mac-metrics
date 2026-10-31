@@ -147,7 +147,7 @@ private struct SettingsView: View {
                         .fixedSize()
                     }
                 }
-                Text("When panels are closed, updates run no faster than every 5 seconds. Process details load only while a panel is open.")
+                Text("When panels are closed, updates run no faster than every 5 seconds. Opening a panel warms all process lists. Frequent use keeps them ready longer.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
