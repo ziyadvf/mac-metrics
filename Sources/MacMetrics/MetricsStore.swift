@@ -5,6 +5,34 @@ import IOKit
 @MainActor
 final class MetricsStore: ObservableObject {
     @Published var searchQueries: [Metric: String] = [:]
+    @Published private(set) var selectedProcesses: [Metric: Int32] = [:]
+    private var selectionIdentity: [Metric: (seconds: UInt64, microseconds: UInt64)] = [:]
+
+    func selectProcess(_ pid: Int32?, for metric: Metric) {
+        guard let pid else {
+            selectedProcesses.removeValue(forKey: metric)
+            selectionIdentity.removeValue(forKey: metric)
+            if metric == .cpu { selectedCPUPID = nil }
+            return
+        }
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return }
+        selectionIdentity[metric] = (UInt64(info.pbi_start_tvsec), UInt64(info.pbi_start_tvusec))
+        selectedProcesses[metric] = pid
+        if metric == .cpu { selectedCPUPID = pid }
+    }
+
+    private func restoreSelection(for metric: Metric) {
+        guard let pid = selectedProcesses[metric], let identity = selectionIdentity[metric] else { return }
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        if proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) != size ||
+            UInt64(info.pbi_start_tvsec) != identity.seconds || UInt64(info.pbi_start_tvusec) != identity.microseconds {
+            selectProcess(nil, for: metric)
+        } else if metric == .cpu { selectedCPUPID = pid }
+    }
+
     private var snapshotStorage = MetricSnapshot()
     private var batchingSnapshot = false
     private(set) var snapshot: MetricSnapshot {
@@ -70,6 +98,7 @@ final class MetricsStore: ObservableObject {
         lastOpen = now
         warmDuration = min(300, 30 + engagement * 30)
         activeMetric = metric
+        restoreSelection(for: metric)
         scheduleRefreshTimer()
         refresh()
     }

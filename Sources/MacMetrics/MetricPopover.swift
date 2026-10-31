@@ -5,7 +5,10 @@ struct MetricPopover: View {
     @ObservedObject var store: MetricsStore
     let openSettings: () -> Void
     @State private var hoveredProcess: Int32?
-    @State private var selectedProcess: Int32?
+    private var selectedProcess: Int32? {
+        get { store.selectedProcesses[metric] }
+        nonmutating set { store.selectProcess(newValue, for: metric) }
+    }
     @State private var displayedProcesses: [ProcessUsage] = []
     private var search: String {
         get { store.searchQueries[metric] ?? "" }
@@ -285,12 +288,16 @@ struct MetricPopover: View {
                 if isAtTop != edges.atTop { isAtTop = edges.atTop }
                 if isAtBottom != edges.atBottom { isAtBottom = edges.atBottom }
             })
+            .onAppear {
+                if let pid = selectedProcess {
+                    DispatchQueue.main.async { proxy.scrollTo(pid, anchor: .center) }
+                }
+            }
             .onChange(of: search) { _, _ in
                 proxy.scrollTo("process-list-top", anchor: .top)
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: displayedProcesses.isEmpty)
             .onChange(of: selectedProcess) { _, pid in
-                if metric == .cpu { store.selectedCPUPID = pid }
                 guard let pid else { return }
                 updateProcesses(store.snapshot.processUsage[metric] ?? [])
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
