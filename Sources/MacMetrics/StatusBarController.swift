@@ -103,7 +103,7 @@ final class StatusBarController: NSObject {
 
     private func refreshLabels() {
         let snapshot = store.snapshot
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
         let orderedMetrics: [Metric] = [.memory, .gpu, .cpu]
         for metric in orderedMetrics {
@@ -122,14 +122,14 @@ final class StatusBarController: NSObject {
         // button and highlight. Creating them consecutively keeps the initial
         // layout adjacent; macOS owns their subsequent positioning.
         for metric in [Metric.memory, .gpu, .cpu] {
-            let item = NSStatusBar.system.statusItem(withLength: 43)
+            let item = NSStatusBar.system.statusItem(withLength: 49)
             item.autosaveName = "MacMetrics.\(metric.rawValue)"
             guard let button = item.button else { continue }
             button.target = self
             button.action = #selector(togglePopover(_:))
             button.tag = Metric.allCases.firstIndex(of: metric) ?? 0
             button.focusRingType = .none
-            button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            button.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
             button.toolTip = "\(metric.rawValue) usage"
             button.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
             statusItems[metric] = item

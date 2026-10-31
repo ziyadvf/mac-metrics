@@ -49,8 +49,22 @@ struct MetricPopover: View {
                 .padding(.vertical, 3)
             }
 
-            if metric == .cpu, !store.snapshot.cpuCoreGroups.isEmpty {
-                cpuCoreUsage
+            if metric == .cpu {
+                if store.snapshot.cpuCoreGroups.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("CPU cores").font(.system(size: 12, weight: .semibold))
+                        HStack(spacing: 8) {
+                            ForEach(0..<min(8, ProcessInfo.processInfo.processorCount), id: \.self) { _ in
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.primary.opacity(0.10))
+                                    .frame(height: 22)
+                            }
+                        }
+                    }
+                    .accessibilityLabel("Loading CPU cores")
+                } else {
+                    cpuCoreUsage
+                }
             }
 
             HStack(alignment: .firstTextBaseline) {

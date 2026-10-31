@@ -17,6 +17,7 @@ final class MetricsStore: ObservableObject {
     private let logicalCoreCount = max(1, ProcessInfo.processInfo.processorCount)
     private var processSamplingTask: Task<Void, Never>?
     private var timer: Timer?
+    private var idleCleanupTask: Task<Void, Never>?
     private var refreshInterval: TimeInterval
     private var previousProcessorTicks: [ProcessorTicks] = []
     private var previousProcesses: [Int32: UInt64] = [:]
@@ -51,12 +52,23 @@ final class MetricsStore: ObservableObject {
     }
 
     func show(_ metric: Metric) {
+        idleCleanupTask?.cancel()
+        idleCleanupTask = nil
         activeMetric = metric
         refreshProcesses(for: metric)
     }
 
     func hide(_ metric: Metric) {
-        if activeMetric == metric { activeMetric = nil }
+        guard activeMetric == metric else { return }
+        activeMetric = nil
+        idleCleanupTask?.cancel()
+        idleCleanupTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            guard let self, self.activeMetric == nil else { return }
+            self.previousProcesses.removeAll()
+            self.processIcons.removeAll()
+            self.snapshot.processUsage.removeAll()
+        }
     }
 
     func forceQuit(_ process: ProcessUsage) {
@@ -91,7 +103,7 @@ final class MetricsStore: ObservableObject {
     }
 
     func refreshProcesses(for metric: Metric) {
-        guard metric != .gpu, processSamplingTask == nil else { return }
+        guard activeMetric == metric, metric != .gpu, processSamplingTask == nil else { return }
         processSamplingTask = Task { [weak self] in
             let sample = await Task.detached(priority: .utility) {
                 let start = ProcessInfo.processInfo.systemUptime
