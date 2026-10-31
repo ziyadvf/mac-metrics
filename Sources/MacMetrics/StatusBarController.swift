@@ -7,8 +7,7 @@ final class StatusBarController: NSObject {
     private let preferences: AppPreferences
     private let store: MetricsStore
     private let settingsWindow: SettingsWindowController
-    private let statusItem: NSStatusItem
-    private let statusContainer = NSView()
+    private var statusItems: [Metric: NSStatusItem] = [:]
     private var metricButtons: [Metric: NSButton] = [:]
     private var panels: [Metric: NSPanel] = [:]
     private var hostingControllers: [Metric: NSHostingController<MetricPopover>] = [:]
@@ -21,7 +20,6 @@ final class StatusBarController: NSObject {
         self.preferences = preferences
         self.store = MetricsStore(refreshInterval: preferences.refreshInterval)
         self.settingsWindow = SettingsWindowController(preferences: preferences)
-        self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         configureStatusItem()
         for metric in Metric.allCases {
@@ -68,16 +66,13 @@ final class StatusBarController: NSObject {
     }
 
     private func applyMetricVisibility() {
-        let visibleMetrics = Metric.allCases.filter(isMetricVisible)
-        statusItem.isVisible = !visibleMetrics.isEmpty
+        for metric in Metric.allCases { statusItems[metric]?.isVisible = isMetricVisible(metric) }
         for metric in Metric.allCases {
             guard !isMetricVisible(metric), let panel = panels[metric], panel.isVisible else { continue }
             panel.orderOut(nil)
             store.hide(metric)
             metricButtons[metric]?.state = .off
         }
-        rebuildStatusSegments()
-        updateStatusItemWidth()
         refreshLabels()
     }
 
@@ -116,60 +111,25 @@ final class StatusBarController: NSObject {
             metricButtons[metric]?.setAccessibilityLabel(label)
         }
 
-        updateStatusItemWidth()
         resizeVisiblePanels()
     }
 
     private func configureStatusItem() {
-        // A custom status view owns the controls directly. NSStatusBarButton's
-        // tracking loop must not wrap the three independent buttons.
-        statusContainer.frame = NSRect(x: 0, y: 0, width: 216, height: NSStatusBar.system.thickness)
-        if let cell = statusItem.button?.cell as? NSButtonCell {
-            cell.highlightsBy = []
-            cell.showsStateBy = []
+        // Each metric is an independent system status item, with its own native
+        // button and highlight. Creating them consecutively keeps the initial
+        // layout adjacent; macOS owns their subsequent positioning.
+        for metric in [Metric.memory, .gpu, .cpu] {
+            let item = NSStatusBar.system.statusItem(withLength: 66)
+            item.autosaveName = "MacMetrics.\(metric.rawValue)"
+            guard let button = item.button else { continue }
+            button.target = self
+            button.action = #selector(togglePopover(_:))
+            button.tag = Metric.allCases.firstIndex(of: metric) ?? 0
+            button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            button.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
+            statusItems[metric] = item
+            metricButtons[metric] = button
         }
-        statusItem.view = statusContainer
-        statusItem.highlightMode = false
-        if let cell = statusItem.button?.cell as? NSButtonCell {
-            cell.highlightsBy = []
-            cell.showsStateBy = []
-        }
-        statusItem.button?.highlight(false)
-        statusItem.button?.target = nil
-        statusItem.button?.action = nil
-
-        for metric in [Metric.cpu, .gpu, .memory] {
-            let metricButton = MetricTileButton(title: "", target: self, action: #selector(togglePopover(_:)))
-            metricButton.tag = Metric.allCases.firstIndex(of: metric) ?? 0
-            metricButton.isBordered = false
-            metricButton.bezelStyle = .regularSquare
-            metricButton.alignment = .center
-            metricButton.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-            metricButton.setContentHuggingPriority(.required, for: .horizontal)
-            metricButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-            metricButton.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
-            statusContainer.addSubview(metricButton)
-            metricButtons[metric] = metricButton
-        }
-    }
-
-    private func rebuildStatusSegments() {
-        for (metric, button) in metricButtons {
-            button.isHidden = !isMetricVisible(metric)
-        }
-    }
-
-    private func updateStatusItemWidth() {
-        let height = NSStatusBar.system.thickness
-        var x: CGFloat = 4
-        for metric in [Metric.cpu, .gpu, .memory] where isMetricVisible(metric) {
-            guard let button = metricButtons[metric] else { continue }
-            button.frame = NSRect(x: x, y: 0, width: 66, height: height)
-            x += 70
-        }
-        let width = max(22, x)
-        statusContainer.setFrameSize(NSSize(width: width, height: height))
-        statusItem.length = width
     }
 
     private func statusLabel(for metric: Metric, snapshot: MetricSnapshot) -> String {
@@ -195,9 +155,9 @@ final class StatusBarController: NSObject {
     }
 
     private func installOutsideClickMonitors() {
-        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .rightMouseDown]) { [weak self] event in
-            guard let self else { return event }
-            return self.routeLocalEvent(event, at: NSEvent.mouseLocation)
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            self?.closePopoversIfOutside(NSEvent.mouseLocation)
+            return event
         }
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in
@@ -207,38 +167,11 @@ final class StatusBarController: NSObject {
         }
     }
 
-    // Status-item hosting can intercept child NSButton tracking on newer macOS.
-    // Route from the actual screen-space tile rectangles before AppKit dispatches
-    // the event to that host, and consume both halves of the click.
-    private func routeLocalEvent(_ event: NSEvent, at screenPoint: NSPoint) -> NSEvent? {
-        if let window = statusContainer.window {
-            let group = window.convertToScreen(statusContainer.convert(statusContainer.bounds, to: nil))
-            if group.contains(screenPoint) {
-                if event.type == .leftMouseDown, !event.modifierFlags.contains(.command) {
-                    for metric in [Metric.cpu, .gpu, .memory] {
-                        guard let button = metricButtons[metric], !button.isHidden else { continue }
-                        let tile = window.convertToScreen(button.convert(button.bounds, to: nil))
-                        if tile.contains(screenPoint) {
-                            togglePopover(button)
-                            break
-                        }
-                    }
-                }
-                if event.modifierFlags.contains(.command) { return event }
-                return nil
-            }
-        }
-        if event.type != .leftMouseUp { closePopoversIfOutside(screenPoint) }
-        return event
-    }
-
     private func closePopoversIfOutside(_ point: NSPoint) {
         guard panels.values.contains(where: \.isVisible) else { return }
-        let clickedStatusButton: Bool
-        if let window = statusContainer.window {
-            clickedStatusButton = window.convertToScreen(statusContainer.convert(statusContainer.bounds, to: nil)).contains(point)
-        } else {
-            clickedStatusButton = false
+        let clickedStatusButton = statusItems.values.contains { item in
+            guard item.isVisible, let button = item.button, let window = button.window else { return false }
+            return window.convertToScreen(button.convert(button.bounds, to: nil)).contains(point)
         }
         if clickedStatusButton { return }
 
@@ -283,29 +216,5 @@ final class StatusBarController: NSObject {
         let x = min(max(anchor.midX - panel.frame.width / 2, screen.minX + 8), screen.maxX - panel.frame.width - 8)
         let y = max(anchor.minY - panel.frame.height - 4, screen.minY + 8)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
-    }
-}
-
-
-@MainActor
-private final class MetricTileButton: NSButton {
-    override func draw(_ dirtyRect: NSRect) {
-        let tile = bounds.insetBy(dx: 0, dy: 2)
-        NSColor.labelColor.withAlphaComponent((isHighlighted || state == .on) ? 0.24 : 0.12).setFill()
-        NSBezierPath(roundedRect: tile, xRadius: 5, yRadius: 5).fill()
-        let text = NSAttributedString(string: title, attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor.labelColor
-        ])
-        let size = text.size()
-        text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        isHighlighted = true
-        needsDisplay = true
-        _ = sendAction(action, to: target)
-        isHighlighted = false
-        needsDisplay = true
     }
 }

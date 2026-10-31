@@ -4,7 +4,7 @@ A small, native macOS menu bar monitor focused on CPU, GPU, and RAM.
 
 ## What it does
 
-- Shows CPU, GPU, and RAM percentages as three separate, visibly rounded buttons kept together in one menu bar group.
+- Shows CPU, GPU, and RAM percentages as three independent native menu bar buttons with separate click highlights.
 - Click CPU to see every core’s utilization, grouped by the hardware’s Performance/Efficiency identifiers, and the five busiest processes.
 - Click RAM to see the five processes with the largest physical footprints and current swap usage.
 - Force quit a process from either list after confirming the action; macOS may prevent quitting protected processes.
@@ -13,6 +13,8 @@ A small, native macOS menu bar monitor focused on CPU, GPU, and RAM.
 - Samples lightweight system totals at the selected interval; process rankings are read only while a metric panel is open.
 - Uses Swift, AppKit, SwiftUI, and system frameworks only. No analytics, network access, or third-party dependencies.
 - Uses native Liquid Glass on macOS 26 and newer, with a system material fallback on macOS 14 and 15.
+
+Each metric has its own saved menu bar position. macOS controls ordering; Command-drag the buttons to arrange them. Independent system items cannot be locked into an indivisible group through the public status-item API.
 
 ## Percentage conventions
 
