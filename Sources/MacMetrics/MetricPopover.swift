@@ -20,6 +20,7 @@ struct MetricPopover: View {
     @State private var isAtBottom = true
     @State private var settingsHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     private var value: Double {
         switch metric {
@@ -146,7 +147,7 @@ struct MetricPopover: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(metric.rawValue)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.primary.opacity(colorScheme == .dark ? 0.78 : 0.6))
             HStack(alignment: .lastTextBaseline, spacing: 8) {
                 Text(hasValue ? String(format: "%.0f%%", value) : "—")
                     .font(.system(size: 36, weight: .medium, design: .rounded))
@@ -197,7 +198,7 @@ struct MetricPopover: View {
         .frame(height: 18)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color.primary.opacity(colorScheme == .dark ? 0.065 : 0.035), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var processList: some View {
@@ -660,7 +661,7 @@ private struct ProcessRow: View {
                     .help(process.name)
                 Text("PID \(process.pid)")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 3) {
@@ -729,7 +730,7 @@ private struct ProcessRow: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.26), value: selected)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: cpuDetail?.performance)
         .opacity(process.isRunning ? 1 : 0.45)
-        .background(selected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(hovered ? 0.065 : (rank.isMultiple(of: 2) ? 0.018 : 0)), in: RoundedRectangle(cornerRadius: 8))
+        .background(selected ? Color.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.16) : Color.primary.opacity(hovered ? 0.08 : (rank.isMultiple(of: 2) ? (colorScheme == .dark ? 0.028 : 0.018) : 0)), in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             if selected {
                 RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor.opacity(0.3), lineWidth: 1)
@@ -752,13 +753,14 @@ private struct ProcessRow: View {
 }
 
 private struct MenuBarGlassSurface: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
     private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
             content
-                .glassEffect(.regular, in: shape)
+                .glassEffect(.regular.tint(colorScheme == .dark ? Color.white.opacity(0.055) : .clear), in: shape)
                 .clipShape(shape)
         } else {
             content
