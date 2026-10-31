@@ -4,6 +4,7 @@ import IOKit
 
 @MainActor
 final class MetricsStore: ObservableObject {
+    @Published var searchQueries: [Metric: String] = [:]
     @Published private(set) var snapshot = MetricSnapshot()
     @Published private(set) var activeMetric: Metric?
     @Published private(set) var terminationFailure: String?

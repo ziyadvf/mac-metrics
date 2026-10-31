@@ -8,7 +8,10 @@ struct MetricPopover: View {
     @State private var showTerminationFailure = false
     @State private var hoveredProcess: Int32?
     @State private var displayedProcesses: [ProcessUsage] = []
-    @State private var search = ""
+    private var search: String {
+        get { store.searchQueries[metric] ?? "" }
+        nonmutating set { store.searchQueries[metric] = newValue }
+    }
     @State private var isScrolling = false
     @State private var isAtTop = true
     @State private var settingsHovered = false
@@ -160,7 +163,7 @@ struct MetricPopover: View {
     private var processSearch: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
-            TextField("Search processes", text: $search)
+            TextField("Search processes", text: Binding(get: { search }, set: { search = $0 }))
                 .textFieldStyle(.plain)
                 .accessibilityLabel("Search processes by name or PID")
             if !search.isEmpty {
@@ -351,8 +354,8 @@ struct MetricPopover: View {
 
     private func coreTint(for type: CPUCoreType) -> Color {
         switch type {
-        case .performance: .blue
-        case .efficiency: .teal
+        case .performance: .red
+        case .efficiency: .blue
         case .standard: .accentColor
         }
     }

@@ -110,7 +110,7 @@ final class StatusBarController: NSObject {
             let label = statusLabel(for: metric, snapshot: snapshot)
             metricButtons[metric]?.attributedTitle = NSAttributedString(string: label, attributes: attributes)
             let accessibleValue = metric == .gpu && snapshot.gpuPercent == nil
-                ? "unavailable" : label.trimmingCharacters(in: .whitespacesAndNewlines)
+                ? "unavailable" : String(label.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
             metricButtons[metric]?.setAccessibilityLabel("\(metric.rawValue) usage: \(accessibleValue)")
         }
 
@@ -122,18 +122,13 @@ final class StatusBarController: NSObject {
         // button and highlight. Creating them consecutively keeps the initial
         // layout adjacent; macOS owns their subsequent positioning.
         for metric in [Metric.memory, .gpu, .cpu] {
-            let image = NSImage(systemSymbolName: metric.symbol, accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
-            let item = NSStatusBar.system.statusItem(withLength: image == nil ? 62 : 52)
+            let item = NSStatusBar.system.statusItem(withLength: 43)
             item.autosaveName = "MacMetrics.\(metric.rawValue)"
             guard let button = item.button else { continue }
             button.target = self
             button.action = #selector(togglePopover(_:))
             button.tag = Metric.allCases.firstIndex(of: metric) ?? 0
             button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-            image?.isTemplate = true
-            button.image = image
-            button.imagePosition = .imageLeading
             button.toolTip = "\(metric.rawValue) usage"
             button.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
             statusItems[metric] = item
@@ -142,21 +137,16 @@ final class StatusBarController: NSObject {
     }
 
     private func statusLabel(for metric: Metric, snapshot: MetricSnapshot) -> String {
+        let prefix: String
+        let value: Double?
         switch metric {
-        case .memory: compactPercentage(snapshot.memoryPercent, metric: .memory)
-        case .gpu:
-            snapshot.gpuPercent.map { compactPercentage($0, metric: .gpu) }
-                ?? (metricButtons[.gpu]?.image == nil ? "GPU\u{2009}  —%" : "\u{2007}\u{2007}–%")
-        case .cpu: compactPercentage(snapshot.cpuPercent, metric: .cpu)
+        case .cpu: prefix = "C"; value = snapshot.cpuPercent
+        case .gpu: prefix = "G"; value = snapshot.gpuPercent
+        case .memory: prefix = "R"; value = snapshot.memoryPercent
         }
-    }
-
-    private func compactPercentage(_ value: Double, metric: Metric) -> String {
-        guard metricButtons[metric]?.image != nil else {
-            return String(format: "%@\u{2009}%3.0f%%", metric.rawValue, value)
-        }
+        guard let value else { return "\(prefix)\u{2007}\u{2007}–%" }
         let digits = String(format: "%.0f", min(100, max(0, value)))
-        return String(repeating: "\u{2007}", count: max(0, 3 - digits.count)) + digits + "%"
+        return prefix + String(repeating: "\u{2007}", count: max(0, 3 - digits.count)) + digits + "%"
     }
 
     private func resizeVisiblePanels() {
@@ -180,8 +170,33 @@ final class StatusBarController: NSObject {
     }
 
     private func installOutsideClickMonitors() {
-        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            self?.closePopoversIfOutside(NSEvent.mouseLocation)
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyDown && event.keyCode == 53,
+               let metric = self.panels.first(where: { $0.value.isVisible && $0.value.isKeyWindow })?.key {
+                if !(self.store.searchQueries[metric] ?? "").isEmpty {
+                    self.store.searchQueries[metric] = ""
+                } else {
+                    self.panels[metric]?.orderOut(nil)
+                    self.store.hide(metric)
+                    self.metricButtons[metric]?.state = .off
+                }
+                return nil
+            }
+            if event.type == .rightMouseDown {
+                let point = NSEvent.mouseLocation
+                for item in self.statusItems.values {
+                    guard let button = item.button, let window = button.window,
+                          window.convertToScreen(button.convert(button.bounds, to: nil)).contains(point) else { continue }
+                    let menu = NSMenu()
+                    let quit = NSMenuItem(title: "Quit Mac Metrics", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+                    quit.target = NSApp
+                    menu.addItem(quit)
+                    menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+                    return nil
+                }
+            }
+            if event.type != .keyDown { self.closePopoversIfOutside(NSEvent.mouseLocation) }
             return event
         }
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
@@ -231,11 +246,7 @@ final class StatusBarController: NSObject {
             panel.setContentSize(NSSize(width: 340, height: height))
             panelLayoutSignatures[metric] = layoutSignature(for: metric)
             position(panel, below: sender)
-            if metric == .gpu {
-                panel.orderFront(nil)
-            } else {
-                panel.makeKeyAndOrderFront(nil)
-            }
+            panel.makeKeyAndOrderFront(nil)
         }
     }
 
