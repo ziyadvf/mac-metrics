@@ -7,6 +7,7 @@ struct MetricPopover: View {
     @State private var processToQuit: ProcessUsage?
     @State private var showTerminationFailure = false
     @State private var hoveredProcess: Int32?
+    @State private var selectedProcess: Int32?
     @State private var displayedProcesses: [ProcessUsage] = []
     private var search: String {
         get { store.searchQueries[metric] ?? "" }
@@ -238,6 +239,8 @@ struct MetricPopover: View {
                             rank: index + 1,
                             metric: metric,
                             isScrolling: isScrolling,
+                            selected: selectedProcess == process.pid,
+                            select: { selectedProcess = selectedProcess == process.pid ? nil : process.pid },
                             loadIcon: { store.processIcon(for: process.pid) },
                             hoverChanged: { hovering in
                                 if hovering { hoveredProcess = process.pid }
@@ -245,8 +248,10 @@ struct MetricPopover: View {
                             },
                             quit: { processToQuit = process }
                         )
+                        .id(process.pid)
                     }
                 }
+                .padding(.horizontal, 16)
                 .scrollTargetLayout()
                 .padding(.top, 2)
                 .padding(.bottom, 6)
@@ -256,7 +261,7 @@ struct MetricPopover: View {
                     }
                 }
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.automatic)
             .scrollTargetBehavior(.viewAligned)
             .frame(height: 266)
             .mask {
@@ -275,12 +280,27 @@ struct MetricPopover: View {
             .onChange(of: search) { _, _ in
                 proxy.scrollTo("process-list-top", anchor: .top)
             }
-            .transaction { if isScrolling || !isAtTop { $0.animation = nil } }
+            .onChange(of: selectedProcess) { _, pid in
+                guard let pid else { return }
+                updateProcesses(store.snapshot.processUsage[metric] ?? [])
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(pid, anchor: .center)
+                }
+            }
+            .onChange(of: displayedProcesses) { _, _ in
+                guard let pid = selectedProcess, !isScrolling,
+                      filteredProcesses.contains(where: { $0.pid == pid }) else { return }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(pid, anchor: .center)
+                }
+            }
+            .transaction { if selectedProcess == nil && (isScrolling || !isAtTop) { $0.animation = nil } }
         }
+        .padding(.horizontal, -16)
     }
 
     private func updateProcesses(_ incoming: [ProcessUsage], animate: Bool = true) {
-        let preserveOrder = isScrolling || !isAtTop || hoveredProcess != nil
+        let preserveOrder = isScrolling || (selectedProcess == nil && (!isAtTop || hoveredProcess != nil))
         let next = ProcessListOrder.reconcile(current: displayedProcesses, incoming: incoming, preserveOrder: preserveOrder)
         guard next != displayedProcesses else { return }
         if animate && !preserveOrder && !reduceMotion && !displayedProcesses.isEmpty {
@@ -553,6 +573,8 @@ private struct ProcessRow: View {
     let rank: Int
     let metric: Metric
     let isScrolling: Bool
+    let selected: Bool
+    let select: () -> Void
     let loadIcon: () -> NSImage?
     let hoverChanged: (Bool) -> Void
     let quit: () -> Void
@@ -619,8 +641,15 @@ private struct ProcessRow: View {
         .padding(.horizontal, 6)
         .frame(height: 50)
         .opacity(process.isRunning ? 1 : 0.45)
-        .background(Color.primary.opacity(hovered ? 0.065 : (rank.isMultiple(of: 2) ? 0.018 : 0)), in: RoundedRectangle(cornerRadius: 8))
+        .background(selected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(hovered ? 0.065 : (rank.isMultiple(of: 2) ? 0.018 : 0)), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if selected {
+                RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor.opacity(0.3), lineWidth: 1)
+            }
+        }
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
         .contentShape(Rectangle())
+        .onTapGesture(perform: select)
         .onHover { hovered = $0; hoverChanged($0) }
         .task(id: isScrolling) {
             guard !isScrolling, icon == nil else { return }
