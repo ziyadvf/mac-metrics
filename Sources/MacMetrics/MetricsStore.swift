@@ -87,9 +87,9 @@ final class MetricsStore: ObservableObject {
             deltas[sample.pid, default: 0] += sample.time - prior.time
         }
         snapshot.processUsage[.gpu] = deltas.map { pid, delta in
-            let milliseconds = Double(delta) / 1_000_000 / max(0.001, now - priorTime)
-            return ProcessUsage(pid: pid, name: names[pid] ?? "Process", value: milliseconds,
-                                detail: String(format: "%.1f ms/s", milliseconds), icon: nil)
+            let percent = Double(delta) / 1_000_000_000 / max(0.001, now - priorTime) * 100
+            return ProcessUsage(pid: pid, name: names[pid] ?? "Process", value: percent,
+                                detail: String(format: "%.1f%%", percent), icon: nil)
         }.sorted { $0.value > $1.value }
     }
 

@@ -62,7 +62,7 @@ struct MetricPopover: View {
             }
 
             HStack(alignment: .firstTextBaseline) {
-                Text(metric == .gpu ? "GPU activity" : metric == .cpu ? "CPU processes" : "Memory use")
+                Text(metric == .gpu ? "GPU time · % of interval" : metric == .cpu ? "CPU processes" : "Memory use")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if metric != .gpu {
@@ -73,24 +73,6 @@ struct MetricPopover: View {
             }
             .padding(.top, 2)
 
-            if metric == .cpu, selectedProcess != nil {
-                HStack {
-                    Text("Selected process").foregroundStyle(.secondary)
-                    Spacer()
-                    if let detail = store.selectedCPUDetail {
-                        Text(String(format: "P %.1f%% · E %.1f%%", detail.performance, detail.efficiency))
-                            .monospacedDigit()
-                    } else {
-                        Text("Measuring…").foregroundStyle(.secondary)
-                    }
-                }
-                .font(.system(size: 11))
-            }
-            if metric == .gpu {
-                Text("Experimental · GPU time, ms/s. Driver counters may overlap and aren’t total-GPU percentages.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             processSearch
             processList
 
@@ -249,6 +231,7 @@ struct MetricPopover: View {
                             metric: metric,
                             isScrolling: isScrolling,
                             selected: selectedProcess == process.pid,
+                            cpuDetail: metric == .cpu && selectedProcess == process.pid ? store.selectedCPUDetail : nil,
                             select: { selectedProcess = selectedProcess == process.pid ? nil : process.pid },
                             loadIcon: { store.processIcon(for: process.pid) },
                             hoverChanged: { hovering in
@@ -607,6 +590,7 @@ private struct ProcessRow: View {
     let metric: Metric
     let isScrolling: Bool
     let selected: Bool
+    var cpuDetail: (performance: Double, efficiency: Double)? = nil
     let select: () -> Void
     let loadIcon: () -> NSImage?
     let hoverChanged: (Bool) -> Void
@@ -617,6 +601,7 @@ private struct ProcessRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        VStack(spacing: 0) {
         HStack(spacing: 8) {
             Group {
                 if let icon {
@@ -671,8 +656,41 @@ private struct ProcessRow: View {
             .help("Force Quit \(process.name)")
             .accessibilityLabel("Force Quit \(process.name)")
         }
-        .padding(.horizontal, 6)
         .frame(height: 50)
+        if selected && metric == .cpu {
+            VStack(spacing: 7) {
+                HStack {
+                    Text(cpuDetail.map { String(format: "Performance %.1f%%", $0.performance) } ?? "Performance —")
+                        .foregroundStyle(.red)
+                    Spacer()
+                    Text(cpuDetail.map { String(format: "Efficiency %.1f%%", $0.efficiency) } ?? "Efficiency —")
+                        .foregroundStyle(.cyan)
+                }
+                .font(.system(size: 10, weight: .medium))
+                .monospacedDigit()
+                GeometryReader { geometry in
+                    let total = (cpuDetail?.performance ?? 0) + (cpuDetail?.efficiency ?? 0)
+                    HStack(spacing: 0) {
+                        Rectangle().fill(Color.red.opacity(0.85))
+                            .frame(width: total > 0 ? geometry.size.width * (cpuDetail?.performance ?? 0) / total : 0)
+                        Rectangle().fill(Color.cyan.opacity(0.85))
+                            .frame(width: total > 0 ? geometry.size.width * (cpuDetail?.efficiency ?? 0) / total : 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.08))
+                    .clipShape(Capsule())
+                }
+                .frame(height: 5)
+                .modifier(LoadingShimmer(loading: cpuDetail == nil))
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 12)
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+        }
+        .padding(.horizontal, 6)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: selected)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: cpuDetail?.performance)
         .opacity(process.isRunning ? 1 : 0.45)
         .background(selected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(hovered ? 0.065 : (rank.isMultiple(of: 2) ? 0.018 : 0)), in: RoundedRectangle(cornerRadius: 8))
         .overlay {
