@@ -4,7 +4,7 @@ A small, native macOS menu bar monitor focused on CPU, GPU, and RAM.
 
 ## What it does
 
-- Shows CPU, GPU, and RAM percentages as three independent native menu bar buttons with separate click highlights.
+- Shows CPU, GPU, and RAM percentages with native symbols in three independent menu bar buttons. Hover for the full name; the display symbol represents GPU.
 - Click CPU to see every core’s utilization, grouped by the hardware’s Performance/Efficiency identifiers, and a scrollable list of your processes, ordered by CPU usage.
 - Click RAM to see a scrollable list of your processes ordered by physical footprint, and current swap usage.
 - Force quit a process from either list after confirming the action; macOS may prevent quitting protected processes.

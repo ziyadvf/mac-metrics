@@ -109,7 +109,9 @@ final class StatusBarController: NSObject {
         for metric in orderedMetrics {
             let label = statusLabel(for: metric, snapshot: snapshot)
             metricButtons[metric]?.attributedTitle = NSAttributedString(string: label, attributes: attributes)
-            metricButtons[metric]?.setAccessibilityLabel(label)
+            let accessibleValue = metric == .gpu && snapshot.gpuPercent == nil
+                ? "unavailable" : label.trimmingCharacters(in: .whitespacesAndNewlines)
+            metricButtons[metric]?.setAccessibilityLabel("\(metric.rawValue) usage: \(accessibleValue)")
         }
 
         resizeVisiblePanels()
@@ -120,13 +122,19 @@ final class StatusBarController: NSObject {
         // button and highlight. Creating them consecutively keeps the initial
         // layout adjacent; macOS owns their subsequent positioning.
         for metric in [Metric.memory, .gpu, .cpu] {
-            let item = NSStatusBar.system.statusItem(withLength: 62)
+            let image = NSImage(systemSymbolName: metric.symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
+            let item = NSStatusBar.system.statusItem(withLength: image == nil ? 62 : 52)
             item.autosaveName = "MacMetrics.\(metric.rawValue)"
             guard let button = item.button else { continue }
             button.target = self
             button.action = #selector(togglePopover(_:))
             button.tag = Metric.allCases.firstIndex(of: metric) ?? 0
             button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            image?.isTemplate = true
+            button.image = image
+            button.imagePosition = .imageLeading
+            button.toolTip = "\(metric.rawValue) usage"
             button.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
             statusItems[metric] = item
             metricButtons[metric] = button
@@ -135,11 +143,20 @@ final class StatusBarController: NSObject {
 
     private func statusLabel(for metric: Metric, snapshot: MetricSnapshot) -> String {
         switch metric {
-        case .memory: String(format: "RAM\u{2009}%3.0f%%", snapshot.memoryPercent)
+        case .memory: compactPercentage(snapshot.memoryPercent, metric: .memory)
         case .gpu:
-            snapshot.gpuPercent.map { String(format: "GPU\u{2009}%3.0f%%", $0) } ?? "GPU\u{2009}  —%"
-        case .cpu: String(format: "CPU\u{2009}%3.0f%%", snapshot.cpuPercent)
+            snapshot.gpuPercent.map { compactPercentage($0, metric: .gpu) }
+                ?? (metricButtons[.gpu]?.image == nil ? "GPU\u{2009}  —%" : "\u{2007}\u{2007}–%")
+        case .cpu: compactPercentage(snapshot.cpuPercent, metric: .cpu)
         }
+    }
+
+    private func compactPercentage(_ value: Double, metric: Metric) -> String {
+        guard metricButtons[metric]?.image != nil else {
+            return String(format: "%@\u{2009}%3.0f%%", metric.rawValue, value)
+        }
+        let digits = String(format: "%.0f", min(100, max(0, value)))
+        return String(repeating: "\u{2007}", count: max(0, 3 - digits.count)) + digits + "%"
     }
 
     private func resizeVisiblePanels() {
