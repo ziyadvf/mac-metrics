@@ -179,8 +179,10 @@ struct MetricPopover: View {
     }
 
     private var processSearch: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
             TextField("Search processes", text: Binding(get: { search }, set: { search = $0 }))
                 .textFieldStyle(.plain)
                 .focusEffectDisabled()
@@ -190,7 +192,8 @@ struct MetricPopover: View {
                 Button { search = "" } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 20)
+                        .font(.system(size: 11))
+                        .frame(width: 18, height: 18)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -199,10 +202,10 @@ struct MetricPopover: View {
             }
         }
         .font(.system(size: 12))
-        .frame(height: 20)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+        .frame(height: 18)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var processList: some View {
