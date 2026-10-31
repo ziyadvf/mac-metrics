@@ -90,7 +90,7 @@ struct MetricPopover: View {
                 processList
             }
 
-            Divider().padding(.top, 2)
+            Divider().padding(.top, metric == .gpu ? 2 : -8)
             Button(action: openSettings) {
                 HStack {
                     Label("Settings…", systemImage: "gearshape")
@@ -236,7 +236,8 @@ struct MetricPopover: View {
                     }
                 }
                 .scrollTargetLayout()
-                .padding(.vertical, 2)
+                .padding(.top, 2)
+                .padding(.bottom, 12)
                 .background {
                     if #unavailable(macOS 15.0) {
                         ProcessScrollObserver(scrolling: { isScrolling = $0 }, atTop: { isAtTop = $0 }, atBottom: { isAtBottom = $0 })
@@ -245,7 +246,7 @@ struct MetricPopover: View {
             }
             .scrollIndicators(.automatic)
             .scrollTargetBehavior(.viewAligned)
-            .frame(height: 262)
+            .frame(height: 272)
             .mask {
                 VStack(spacing: 0) {
                     LinearGradient(colors: [isAtTop ? .white : .clear, .white], startPoint: .top, endPoint: .bottom)
@@ -620,13 +621,12 @@ private struct MenuBarGlassSurface: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: shape)
+            content
+                .glassEffect(.regular, in: shape)
+                .clipShape(shape)
         } else {
             content
                 .background(.regularMaterial, in: shape)
-                .overlay {
-                    shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                }
                 .clipShape(shape)
         }
     }

@@ -36,6 +36,10 @@ final class StatusBarController: NSObject {
                 defer: false
             )
             panel.contentViewController = hostingController
+            hostingController.view.wantsLayer = true
+            hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
+            hostingController.view.layer?.cornerRadius = 16
+            hostingController.view.layer?.masksToBounds = true
             panel.isFloatingPanel = true
             panel.isReleasedWhenClosed = false
             panel.isOpaque = false
