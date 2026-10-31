@@ -16,7 +16,7 @@ A small, native macOS menu bar monitor focused on CPU, GPU, and RAM.
 
 Each metric has its own saved menu bar position. macOS controls ordering; Command-drag the buttons to arrange them. Independent system items cannot be locked into an indivisible group through the public status-item API.
 
-CPU and RAM lists support searching by process name or PID. Values keep updating while you scroll, but row order stays fixed until you return to the top; processes that exit while browsing are marked Ended so they cannot shift the visible rows. Process scanning runs away from the UI thread and app icons load only for visible rows. Subtle hover and row transitions respect Reduce Motion; popovers still open without animation.
+CPU and RAM lists support searching by process name or PID. Values keep updating while you scroll, but row order stays fixed until you return to the top; processes that exit while browsing are marked Ended so they cannot shift the visible rows. Process scanning runs away from the UI thread, visible-row icons load after scrolling settles, and rows align when scrolling stops. Subtle hover and row transitions respect Reduce Motion; popovers still open without animation.
 
 ## Percentage conventions
 

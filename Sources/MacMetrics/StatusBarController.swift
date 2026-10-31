@@ -11,6 +11,7 @@ final class StatusBarController: NSObject {
     private var metricButtons: [Metric: NSButton] = [:]
     private var panels: [Metric: NSPanel] = [:]
     private var hostingControllers: [Metric: NSHostingController<MetricPopover>] = [:]
+    private var panelLayoutSignatures: [Metric: [Int]] = [:]
     private var refreshTimer: Timer?
     private var subscriptions = Set<AnyCancellable>()
     private var localClickMonitor: Any?
@@ -145,6 +146,9 @@ final class StatusBarController: NSObject {
         for (metric, panel) in panels where panel.isVisible {
             guard let button = metricButtons[metric],
                   let hostingController = hostingControllers[metric] else { continue }
+            let signature = layoutSignature(for: metric)
+            guard panelLayoutSignatures[metric] != signature else { continue }
+            panelLayoutSignatures[metric] = signature
             hostingController.view.layoutSubtreeIfNeeded()
             let measured = hostingController.sizeThatFits(in: NSSize(width: 340, height: 900))
             let size = NSSize(width: 340, height: max(210, measured.height))
@@ -152,6 +156,10 @@ final class StatusBarController: NSObject {
             panel.setContentSize(size)
             position(panel, below: button)
         }
+    }
+
+    private func layoutSignature(for metric: Metric) -> [Int] {
+        metric == .cpu ? store.snapshot.cpuCoreGroups.map { $0.usage.count } : []
     }
 
     private func installOutsideClickMonitors() {
@@ -204,6 +212,7 @@ final class StatusBarController: NSObject {
             let size = hostingController.sizeThatFits(in: NSSize(width: 340, height: 900))
             let height = max(210, size.height)
             panel.setContentSize(NSSize(width: 340, height: height))
+            panelLayoutSignatures[metric] = layoutSignature(for: metric)
             position(panel, below: sender)
             panel.orderFront(nil)
         }

@@ -197,6 +197,7 @@ struct MetricPopover: View {
                             process: process,
                             rank: index + 1,
                             metric: metric,
+                            isScrolling: isScrolling,
                             loadIcon: { store.processIcon(for: process.pid) },
                             hoverChanged: { hovering in
                                 if hovering { hoveredProcess = process.pid }
@@ -206,6 +207,7 @@ struct MetricPopover: View {
                         )
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.vertical, 2)
                 .background {
                     if #unavailable(macOS 15.0) {
@@ -214,7 +216,8 @@ struct MetricPopover: View {
                 }
             }
             .scrollIndicators(.automatic)
-            .frame(height: 270)
+            .scrollTargetBehavior(.viewAligned)
+            .frame(height: 262)
             .trackProcessScrolling(changed: { isScrolling = $0 }, topChanged: { atTop in
                 if isAtTop != atTop { isAtTop = atTop }
             })
@@ -432,6 +435,7 @@ private struct ProcessRow: View {
     let process: ProcessUsage
     let rank: Int
     let metric: Metric
+    let isScrolling: Bool
     let loadIcon: () -> NSImage?
     let hoverChanged: (Bool) -> Void
     let quit: () -> Void
@@ -442,10 +446,6 @@ private struct ProcessRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("\(rank)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .frame(width: 17, alignment: .trailing)
             Group {
                 if let icon {
                     Image(nsImage: icon).resizable().aspectRatio(contentMode: .fit)
@@ -463,8 +463,9 @@ private struct ProcessRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(process.name)
                     .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .truncationMode(.middle)
+                    .help(process.name)
                 Text("PID \(process.pid)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
@@ -504,7 +505,12 @@ private struct ProcessRow: View {
         .background(Color.primary.opacity(hovered ? 0.065 : (rank.isMultiple(of: 2) ? 0.018 : 0)), in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
         .onHover { hovered = $0; hoverChanged($0) }
-        .onAppear { icon = loadIcon() }
+        .task(id: isScrolling) {
+            guard !isScrolling, icon == nil else { return }
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            icon = loadIcon()
+        }
         .onDisappear { hoverChanged(false) }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: quitHovered)
