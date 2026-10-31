@@ -163,15 +163,24 @@ final class StatusBarController: NSObject {
         // Each metric is an independent system status item, with its own native
         // button and highlight. Creating them consecutively keeps the initial
         // layout adjacent; macOS owns their subsequent positioning.
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        let widestLabel = ["C", "G", "R"].map {
+            NSAttributedString(string: $0 + "\u{2009}100%", attributes: [.font: font]).size().width
+        }.max() ?? 0
+        // Reserve native button insets as well as the full three-digit value.
+        let fixedWidth = ceil(widestLabel) + 16
         for metric in [Metric.memory, .gpu, .cpu] {
-            let item = NSStatusBar.system.statusItem(withLength: 45)
+            let item = NSStatusBar.system.statusItem(withLength: fixedWidth)
             item.autosaveName = "MacMetrics.\(metric.rawValue)"
             guard let button = item.button else { continue }
             button.target = self
             button.action = #selector(togglePopover(_:))
             button.tag = Metric.allCases.firstIndex(of: metric) ?? 0
             button.focusRingType = .none
-            button.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+            button.font = font
+            button.cell?.wraps = false
+            button.cell?.usesSingleLineMode = true
+            button.cell?.lineBreakMode = .byClipping
             button.toolTip = "\(metric.rawValue) usage"
             button.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
             statusItems[metric] = item
