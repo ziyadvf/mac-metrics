@@ -14,6 +14,11 @@ final class StatusBarController: NSObject {
     private var panelLayoutSignatures: [Metric: [Int]] = [:]
     private var observesSnapshots = false
     private var lastLabels: [Metric: String] = [:]
+    private var saturationAlerts: [Metric: SaturationAlert] = [:]
+    private var lastAlertSample: Date?
+    private var blinkTimer: Timer?
+    private var blinkIsRed = false
+    private var lastRedState: [Metric: Bool] = [:]
     private var subscriptions = Set<AnyCancellable>()
     private var localClickMonitor: Any?
     private var globalClickMonitor: Any?
@@ -144,13 +149,44 @@ final class StatusBarController: NSObject {
     private func refreshLabels() {
         let snapshot = store.snapshot
         let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        if lastAlertSample != snapshot.updatedAt {
+            lastAlertSample = snapshot.updatedAt
+            let now = ProcessInfo.processInfo.systemUptime
+            for metric in Metric.allCases {
+                let value: Double? = metric == .cpu ? snapshot.cpuPercent : metric == .memory ? snapshot.memoryPercent : snapshot.gpuPercent
+                saturationAlerts[metric, default: SaturationAlert()].sample(value, at: now, maximumGap: max(5, preferences.refreshInterval) * 2 + 1)
+            }
+        }
+        let sampleIsFresh = Date().timeIntervalSince(snapshot.updatedAt) <= max(5, preferences.refreshInterval) * 2 + 1
+        let needsBlink = sampleIsFresh && Metric.allCases.contains { isMetricVisible($0) && saturationAlerts[$0]?.isActive == true }
+        if needsBlink && blinkTimer == nil {
+            blinkIsRed = true
+            blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.65, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.blinkIsRed.toggle()
+                    self.refreshLabels()
+                }
+            }
+            blinkTimer?.tolerance = 0.1
+        } else if !needsBlink {
+            blinkTimer?.invalidate()
+            blinkTimer = nil
+            blinkIsRed = false
+        }
         let orderedMetrics: [Metric] = [.memory, .gpu, .cpu]
         for metric in orderedMetrics {
             let label = statusLabel(for: metric, snapshot: snapshot)
-            guard lastLabels[metric] != label else { continue }
+            let red = saturationAlerts[metric]?.isActive == true && blinkIsRed
+            guard lastLabels[metric] != label || lastRedState[metric] != red else { continue }
             lastLabels[metric] = label
-            metricButtons[metric]?.attributedTitle = NSAttributedString(string: label, attributes: attributes)
+            lastRedState[metric] = red
+            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: red ? NSColor.systemRed : NSColor.labelColor]
+            let title = NSAttributedString(string: label, attributes: attributes)
+            let expanded = label.contains("100%")
+            let width = expanded ? ceil(title.size().width) + 16 : 45
+            if statusItems[metric]?.length != width { statusItems[metric]?.length = width }
+            metricButtons[metric]?.attributedTitle = title
             let accessibleValue = metric == .gpu && snapshot.gpuPercent == nil
                 ? "unavailable" : String(label.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
             metricButtons[metric]?.setAccessibilityLabel("\(metric.rawValue) usage: \(accessibleValue)")
@@ -164,13 +200,8 @@ final class StatusBarController: NSObject {
         // button and highlight. Creating them consecutively keeps the initial
         // layout adjacent; macOS owns their subsequent positioning.
         let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        let widestLabel = ["C", "G", "R"].map {
-            NSAttributedString(string: $0 + "\u{2009}100%", attributes: [.font: font]).size().width
-        }.max() ?? 0
-        // Reserve native button insets as well as the full three-digit value.
-        let fixedWidth = ceil(widestLabel) + 16
         for metric in [Metric.memory, .gpu, .cpu] {
-            let item = NSStatusBar.system.statusItem(withLength: fixedWidth)
+            let item = NSStatusBar.system.statusItem(withLength: 45)
             item.autosaveName = "MacMetrics.\(metric.rawValue)"
             guard let button = item.button else { continue }
             button.target = self
