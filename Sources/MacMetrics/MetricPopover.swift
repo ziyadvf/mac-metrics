@@ -232,7 +232,11 @@ struct MetricPopover: View {
                             isScrolling: isScrolling,
                             selected: selectedProcess == process.pid,
                             cpuDetail: metric == .cpu && selectedProcess == process.pid ? store.selectedCPUDetail : nil,
-                            select: { selectedProcess = selectedProcess == process.pid ? nil : process.pid },
+                            select: {
+                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.26)) {
+                                    selectedProcess = selectedProcess == process.pid ? nil : process.pid
+                                }
+                            },
                             loadIcon: { store.processIcon(for: process.pid) },
                             hoverChanged: { hovering in
                                 if hovering { hoveredProcess = process.pid }
@@ -599,6 +603,13 @@ private struct ProcessRow: View {
     @State private var hovered = false
     @State private var quitHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    private var performanceColor: Color {
+        colorScheme == .dark ? Color(red: 1, green: 0.48, blue: 0.51) : Color(red: 0.72, green: 0.16, blue: 0.22)
+    }
+    private var efficiencyColor: Color {
+        colorScheme == .dark ? Color(red: 0.35, green: 0.79, blue: 1) : Color(red: 0.02, green: 0.38, blue: 0.58)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -661,19 +672,19 @@ private struct ProcessRow: View {
             VStack(spacing: 7) {
                 HStack {
                     Text(cpuDetail.map { String(format: "Performance %.1f%%", $0.performance) } ?? "Performance —")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(performanceColor)
                     Spacer()
                     Text(cpuDetail.map { String(format: "Efficiency %.1f%%", $0.efficiency) } ?? "Efficiency —")
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(efficiencyColor)
                 }
                 .font(.system(size: 10, weight: .medium))
                 .monospacedDigit()
                 GeometryReader { geometry in
                     let total = (cpuDetail?.performance ?? 0) + (cpuDetail?.efficiency ?? 0)
                     HStack(spacing: 0) {
-                        Rectangle().fill(Color.red.opacity(0.85))
+                        Rectangle().fill(performanceColor)
                             .frame(width: total > 0 ? geometry.size.width * (cpuDetail?.performance ?? 0) / total : 0)
-                        Rectangle().fill(Color.cyan.opacity(0.85))
+                        Rectangle().fill(efficiencyColor)
                             .frame(width: total > 0 ? geometry.size.width * (cpuDetail?.efficiency ?? 0) / total : 0)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -685,12 +696,14 @@ private struct ProcessRow: View {
             }
             .padding(.horizontal, 4)
             .padding(.bottom, 12)
-            .transition(.opacity.combined(with: .move(edge: .top)))
+            .transition(.opacity)
         }
         }
         .padding(.horizontal, 6)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: selected)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: cpuDetail?.performance)
+        .frame(height: selected && metric == .cpu ? 88 : 50, alignment: .top)
+        .clipped()
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.26), value: selected)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: cpuDetail?.performance)
         .opacity(process.isRunning ? 1 : 0.45)
         .background(selected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(hovered ? 0.065 : (rank.isMultiple(of: 2) ? 0.018 : 0)), in: RoundedRectangle(cornerRadius: 8))
         .overlay {
