@@ -7,6 +7,12 @@ struct MetricPopover: View {
     @State private var processToQuit: ProcessUsage?
     @State private var showTerminationFailure = false
     @State private var hoveredProcess: Int32?
+    @State private var displayedProcesses: [ProcessUsage] = []
+    @State private var search = ""
+    @State private var isScrolling = false
+    @State private var isAtTop = true
+    @State private var settingsHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var value: Double {
         switch metric {
@@ -48,7 +54,7 @@ struct MetricPopover: View {
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if metric != .gpu {
-                    Text(metric == .cpu ? "Top 5 · % of CPU" : "Top 5 · % of RAM")
+                    Text("\(filteredProcesses.count) · % of \(metric == .cpu ? "CPU" : "RAM")")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -62,23 +68,43 @@ struct MetricPopover: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.vertical, 8)
             } else {
+                processSearch
                 processList
             }
 
             Divider().padding(.top, 2)
             Button(action: openSettings) {
-                Label("Settings…", systemImage: "gearshape")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Label("Settings…", systemImage: "gearshape")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .medium))
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.primary.opacity(settingsHovered ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
+            .onHover { settingsHovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: settingsHovered)
             .padding(.top, 2)
         }
         .padding(14)
         .frame(width: 340, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .modifier(MenuBarGlassSurface())
-        .transaction { $0.animation = nil }
+        .transaction { if reduceMotion { $0.animation = nil } }
+        .onAppear { updateProcesses(store.snapshot.processUsage[metric] ?? [], animate: false) }
+        .onChange(of: store.snapshot.processUsage[metric] ?? []) { _, incoming in
+            updateProcesses(incoming)
+        }
+        .onChange(of: isScrolling) { _, scrolling in
+            if !scrolling && isAtTop { updateProcesses(store.snapshot.processUsage[metric] ?? []) }
+        }
+        .onChange(of: isAtTop) { _, atTop in
+            if atTop && !isScrolling { updateProcesses(store.snapshot.processUsage[metric] ?? []) }
+        }
         .confirmationDialog(
             "Force quit \(processToQuit?.name ?? "process")?",
             isPresented: Binding(get: { processToQuit != nil }, set: { if !$0 { processToQuit = nil } }),
@@ -109,6 +135,8 @@ struct MetricPopover: View {
                 Text(hasValue ? String(format: "%.0f%%", value) : "—")
                     .font(.system(size: 36, weight: .medium, design: .rounded))
                     .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: Int(value.rounded()))
                 Spacer(minLength: 0)
                 if !summaryDetail.isEmpty {
                     Text(summaryDetail)
@@ -121,25 +149,92 @@ struct MetricPopover: View {
         }
     }
 
-    private var processList: some View {
-        let processes = store.snapshot.processUsage[metric] ?? []
-        return VStack(spacing: 0) {
-            if processes.isEmpty {
-                HStack(spacing: 8) {
-                    if metric == .cpu { ProgressView().controlSize(.small) }
-                    Text(metric == .cpu ? "Measuring CPU usage…" : "No process data available")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
+    private var filteredProcesses: [ProcessUsage] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return displayedProcesses }
+        return displayedProcesses.filter {
+            $0.name.localizedCaseInsensitiveContains(query) || String($0.pid).contains(query)
+        }
+    }
+
+    private var processSearch: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
+            TextField("Search processes", text: $search)
+                .textFieldStyle(.plain)
+                .accessibilityLabel("Search processes by name or PID")
+            if !search.isEmpty {
+                Button { search = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            } else {
-                ForEach(Array(processes.enumerated()), id: \.element.id) { index, process in
-                    processRow(process, rank: index + 1)
-                    if index != processes.count - 1 {
-                        Divider().padding(.leading, 22)
+                .buttonStyle(.plain)
+                .help("Clear search")
+            }
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private var processList: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 2) {
+                    Color.clear.frame(height: 0).id("process-list-top")
+                    if filteredProcesses.isEmpty {
+                        VStack(spacing: 6) {
+                            Image(systemName: search.isEmpty ? "app.dashed" : "magnifyingglass")
+                                .font(.system(size: 20))
+                            Text(search.isEmpty ? (metric == .cpu ? "Measuring CPU usage…" : "No process data available") : "No matching processes")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                    }
+                    ForEach(Array(filteredProcesses.enumerated()), id: \.element.id) { index, process in
+                        ProcessRow(
+                            process: process,
+                            rank: index + 1,
+                            metric: metric,
+                            loadIcon: { store.processIcon(for: process.pid) },
+                            hoverChanged: { hovering in
+                                if hovering { hoveredProcess = process.pid }
+                                else if hoveredProcess == process.pid { hoveredProcess = nil }
+                            },
+                            quit: { processToQuit = process }
+                        )
+                    }
+                }
+                .padding(.vertical, 2)
+                .background {
+                    if #unavailable(macOS 15.0) {
+                        ProcessScrollObserver(scrolling: { isScrolling = $0 }, atTop: { isAtTop = $0 })
                     }
                 }
             }
+            .scrollIndicators(.automatic)
+            .frame(height: 270)
+            .trackProcessScrolling(changed: { isScrolling = $0 }, topChanged: { atTop in
+                if isAtTop != atTop { isAtTop = atTop }
+            })
+            .onChange(of: search) { _, _ in
+                proxy.scrollTo("process-list-top", anchor: .top)
+            }
+            .transaction { if isScrolling || !isAtTop { $0.animation = nil } }
+        }
+    }
+
+    private func updateProcesses(_ incoming: [ProcessUsage], animate: Bool = true) {
+        let preserveOrder = isScrolling || !isAtTop || hoveredProcess != nil
+        let next = ProcessListOrder.reconcile(current: displayedProcesses, incoming: incoming, preserveOrder: preserveOrder)
+        guard next != displayedProcesses else { return }
+        if animate && !preserveOrder && !reduceMotion && !displayedProcesses.isEmpty {
+            withAnimation(.easeInOut(duration: 0.18)) { displayedProcesses = next }
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { displayedProcesses = next }
         }
     }
 
@@ -187,6 +282,7 @@ struct MetricPopover: View {
                                     }
                                 }
                                 .frame(height: 6)
+                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: percent)
                             }
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("\(group.type.rawValue) core \(index + 1), \(Int(percent.rounded())) percent")
@@ -238,6 +334,7 @@ struct MetricPopover: View {
             }
         }
         .padding(.vertical, 4)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: snapshot.memoryUsed)
         .accessibilityLabel("Apps \(MetricsStore.formatBytes(snapshot.memoryApps)), wired \(MetricsStore.formatBytes(snapshot.memoryWired)), compressed \(MetricsStore.formatBytes(snapshot.memoryCompressed))")
     }
 
@@ -257,74 +354,160 @@ struct MetricPopover: View {
         }
     }
 
-    private func processRow(_ process: ProcessUsage, rank: Int) -> some View {
-        HStack(spacing: 7) {
+}
+
+private extension View {
+    @ViewBuilder
+    func trackProcessScrolling(changed: @escaping (Bool) -> Void, topChanged: @escaping (Bool) -> Void) -> some View {
+        if #available(macOS 15.0, *) {
+            self
+                .onScrollPhaseChange { _, phase in changed(phase != .idle) }
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.y + geometry.contentInsets.top <= 3
+                } action: { _, atTop in topChanged(atTop) }
+        } else {
+            self
+        }
+    }
+}
+
+// macOS 14 fallback: observe only this list's enclosing native scroll view.
+private struct ProcessScrollObserver: NSViewRepresentable {
+    let scrolling: (Bool) -> Void
+    let atTop: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ProcessScrollProbe { ProcessScrollProbe() }
+    func updateNSView(_ view: ProcessScrollProbe, context: Context) {
+        view.scrolling = scrolling
+        view.atTop = atTop
+        DispatchQueue.main.async { [weak view] in view?.connect() }
+    }
+    static func dismantleNSView(_ view: ProcessScrollProbe, coordinator: ()) { view.disconnect() }
+}
+
+private final class ProcessScrollProbe: NSView {
+    var scrolling: (Bool) -> Void = { _ in }
+    var atTop: (Bool) -> Void = { _ in }
+    private weak var scroll: NSScrollView?
+    private var observers: [NSObjectProtocol] = []
+    private var lastTop: Bool?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { disconnect() }
+        else { DispatchQueue.main.async { [weak self] in self?.connect() } }
+    }
+    func connect() {
+        guard let enclosing = enclosingScrollView, scroll !== enclosing else { return }
+        disconnect()
+        scroll = enclosing
+        let clip = enclosing.contentView
+        clip.postsBoundsChangedNotifications = true
+        observers.append(NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reportTop() }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: enclosing, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scrolling(true) }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: enclosing, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scrolling(false) }
+        })
+        reportTop()
+    }
+    func disconnect() {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers.removeAll()
+        scroll = nil
+        lastTop = nil
+    }
+    private func reportTop() {
+        guard let scroll else { return }
+        let value = scroll.contentView.bounds.minY <= 3
+        if value != lastTop { lastTop = value; atTop(value) }
+    }
+}
+
+private struct ProcessRow: View {
+    let process: ProcessUsage
+    let rank: Int
+    let metric: Metric
+    let loadIcon: () -> NSImage?
+    let hoverChanged: (Bool) -> Void
+    let quit: () -> Void
+    @State private var icon: NSImage?
+    @State private var hovered = false
+    @State private var quitHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 8) {
             Text("\(rank)")
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.tertiary)
-                .frame(width: 12, alignment: .leading)
-            if let icon = process.icon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 18, height: 18)
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(Color.primary.opacity(0.08))
-                    .frame(width: 18, height: 18)
-                    .overlay {
-                        Image(systemName: "app.fill")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
+                .frame(width: 17, alignment: .trailing)
+            Group {
+                if let icon {
+                    Image(nsImage: icon).resizable().aspectRatio(contentMode: .fit)
+                } else {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(0.07))
+                        .overlay {
+                            Image(systemName: "app.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                }
             }
-            VStack(alignment: .leading, spacing: 1) {
+            .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 3) {
                 Text(process.name)
-                    .font(.system(size: 13, weight: .regular))
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text("PID \(process.pid)")
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
             }
-            .layoutPriority(1)
-            Spacer(minLength: 4)
-            Text(process.detail)
-                .font(.system(size: 12, weight: .medium))
-                .monospacedDigit()
-                .lineLimit(1)
-                .frame(width: metric == .memory ? 64 : 52, alignment: .trailing)
-            if metric == .memory {
-                Text(String(format: "%.1f%%", process.value))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .frame(width: 37, alignment: .trailing)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(process.isRunning ? process.detail : "Ended")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                if metric == .memory && process.isRunning {
+                    Text(String(format: "%.1f%%", process.value))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
             }
-            Button {
-                processToQuit = process
-            } label: {
+            .monospacedDigit()
+            .lineLimit(1)
+            .frame(width: 68, alignment: .trailing)
+            Button(action: quit) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 13, weight: .regular))
-                    .frame(width: 18, height: 20)
+                    .font(.system(size: 14))
+                    .foregroundStyle(quitHovered ? Color.red : Color.secondary)
+                    .frame(width: 20, height: 28)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .foregroundStyle(hoveredProcess == process.pid ? Color.red : Color.secondary.opacity(0.55))
-            .opacity(hoveredProcess == process.pid ? 1 : 0)
+            .disabled(!process.isRunning)
+            .opacity(hovered && process.isRunning ? 1 : 0)
+            .onHover { quitHovered = $0 }
             .help("Force Quit \(process.name)")
             .accessibilityLabel("Force Quit \(process.name)")
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 5)
-        .background {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(Color.primary.opacity(hoveredProcess == process.pid ? 0.045 : 0))
-        }
+        .padding(.horizontal, 6)
+        .frame(height: 50)
+        .opacity(process.isRunning ? 1 : 0.45)
+        .background(Color.primary.opacity(hovered ? 0.065 : (rank.isMultiple(of: 2) ? 0.018 : 0)), in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        .onHover { hoveredProcess = $0 ? process.pid : nil }
+        .onHover { hovered = $0; hoverChanged($0) }
+        .onAppear { icon = loadIcon() }
+        .onDisappear { hoverChanged(false) }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: quitHovered)
     }
 }
 

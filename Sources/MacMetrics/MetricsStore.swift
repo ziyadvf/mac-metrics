@@ -14,6 +14,7 @@ final class MetricsStore: ObservableObject {
         return Double(timebase.numer) / Double(max(1, timebase.denom))
     }()
     private let logicalCoreCount = max(1, ProcessInfo.processInfo.processorCount)
+    private var processSamplingTask: Task<Void, Never>?
     private var timer: Timer?
     private var refreshInterval: TimeInterval
     private var previousProcessorTicks: [ProcessorTicks] = []
@@ -89,10 +90,30 @@ final class MetricsStore: ObservableObject {
     }
 
     func refreshProcesses(for metric: Metric) {
-        guard metric != .gpu else { return }
-        let now = ProcessInfo.processInfo.systemUptime
+        guard metric != .gpu, processSamplingTask == nil else { return }
+        processSamplingTask = Task { [weak self] in
+            let sample = await Task.detached(priority: .utility) {
+                let start = ProcessInfo.processInfo.systemUptime
+                let values = Self.readProcesses(includeFootprint: metric == .memory)
+                let timestamp = (start + ProcessInfo.processInfo.systemUptime) / 2
+                return (timestamp, values)
+            }.value
+            guard let self else { return }
+            self.processSamplingTask = nil
+            guard self.activeMetric == metric else {
+                if let active = self.activeMetric { self.refreshProcesses(for: active) }
+                return
+            }
+            self.applyProcessSample(sample.1, sampledAt: sample.0, for: metric)
+        }
+    }
+
+    private func applyProcessSample(
+        _ current: [(pid: Int32, name: String, cpuAbsoluteTime: UInt64, footprint: UInt64?)],
+        sampledAt now: TimeInterval,
+        for metric: Metric
+    ) {
         let elapsed = max(0.001, now - previousProcessSample)
-        let current = readProcesses(includeFootprint: metric == .memory)
         let currentPIDs = Set(current.map(\.pid))
         processIcons = processIcons.filter { currentPIDs.contains($0.key) }
         let ranked: [(pid: Int32, name: String, value: Double, detail: String)]
@@ -106,23 +127,23 @@ final class MetricsStore: ObservableObject {
                 // system CPU scale. One occupied core on an 8-core Mac is 12.5%.
                 let percent = Double(delta) * cpuNanosecondsPerTick / (elapsed * 1_000_000_000 * Double(logicalCoreCount)) * 100
                 return (process.pid, process.name, percent, String(format: "%.1f%%", percent))
-            }.sorted { $0.value > $1.value }
+            }.sorted { $0.value == $1.value ? $0.pid < $1.pid : $0.value > $1.value }
         } else {
             let total = max(1, snapshot.memoryTotal)
             ranked = current.compactMap { process in
                 guard let footprint = process.footprint else { return nil }
                 let percent = Double(footprint) / Double(total) * 100
                 return (process.pid, process.name, percent, Self.formatBytes(footprint))
-            }.sorted { $0.value > $1.value }
+            }.sorted { $0.value == $1.value ? $0.pid < $1.pid : $0.value > $1.value }
         }
 
-        let usage = ranked.prefix(5).map { process in
+        let usage = ranked.map { process in
             ProcessUsage(
                 pid: process.pid,
                 name: process.name,
                 value: process.value,
                 detail: process.detail,
-                icon: processIcon(for: process.pid)
+                icon: nil
             )
         }
 
@@ -131,7 +152,7 @@ final class MetricsStore: ObservableObject {
         snapshot.processUsage[metric] = usage
     }
 
-    private func processIcon(for pid: Int32) -> NSImage? {
+    func processIcon(for pid: Int32) -> NSImage? {
         if let cachedIcon = processIcons[pid] { return cachedIcon }
         if processIcons.keys.contains(pid) { return nil }
 
@@ -314,7 +335,7 @@ final class MetricsStore: ObservableObject {
         return nil
     }
 
-    private func readProcesses(includeFootprint: Bool) -> [(pid: Int32, name: String, cpuAbsoluteTime: UInt64, footprint: UInt64?)] {
+    nonisolated private static func readProcesses(includeFootprint: Bool) -> [(pid: Int32, name: String, cpuAbsoluteTime: UInt64, footprint: UInt64?)] {
         let byteCount = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
         guard byteCount > 0 else { return [] }
         var pids = [pid_t](repeating: 0, count: Int(byteCount) / MemoryLayout<pid_t>.size + 16)
@@ -339,7 +360,7 @@ final class MetricsStore: ObservableObject {
         }
     }
 
-    private func readPhysicalFootprint(for pid: pid_t) -> UInt64? {
+    nonisolated private static func readPhysicalFootprint(for pid: pid_t) -> UInt64? {
         var usage = rusage_info_v4()
         let result = withUnsafeMutablePointer(to: &usage) { pointer in
             pointer.withMemoryRebound(to: UnsafeMutableRawPointer?.self, capacity: 1) {

@@ -1,7 +1,7 @@
 import Foundation
 import AppKit
 
-enum Metric: String, CaseIterable, Identifiable {
+enum Metric: String, CaseIterable, Identifiable, Sendable {
     case cpu = "CPU"
     case gpu = "GPU"
     case memory = "RAM"
@@ -25,13 +25,33 @@ enum Metric: String, CaseIterable, Identifiable {
     }
 }
 
-struct ProcessUsage: Identifiable {
+struct ProcessUsage: Identifiable, Equatable {
     let pid: Int32
     let name: String
     let value: Double
     let detail: String
     let icon: NSImage?
+    var isRunning = true
     var id: Int32 { pid }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.pid == rhs.pid && lhs.name == rhs.name && lhs.value == rhs.value && lhs.detail == rhs.detail && lhs.isRunning == rhs.isRunning
+    }
+}
+
+struct ProcessListOrder {
+    static func reconcile(current: [ProcessUsage], incoming: [ProcessUsage], preserveOrder: Bool) -> [ProcessUsage] {
+        guard preserveOrder else { return incoming }
+        let updated = Dictionary(uniqueKeysWithValues: incoming.map { ($0.pid, $0) })
+        let existingIDs = Set(current.map(\.pid))
+        let stable = current.map { process in
+            if let refreshed = updated[process.pid] { return refreshed }
+            var ended = process
+            ended.isRunning = false
+            return ended
+        }
+        return stable + incoming.filter { !existingIDs.contains($0.pid) }
+    }
 }
 
 enum CPUCoreType: String, Identifiable {
