@@ -14,6 +14,7 @@ struct MetricPopover: View {
     }
     @State private var isScrolling = false
     @State private var isAtTop = true
+    @State private var isAtBottom = true
     @State private var settingsHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -84,16 +85,19 @@ struct MetricPopover: View {
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
                 .background(Color.primary.opacity(settingsHovered ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
+            .focusEffectDisabled()
             .onHover { settingsHovered = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: settingsHovered)
             .padding(.top, 2)
         }
-        .padding(14)
+        .padding(.horizontal, 16)
+        .padding(.top, 15)
+        .padding(.bottom, 16)
         .frame(width: 340, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .modifier(MenuBarGlassSurface())
@@ -165,19 +169,26 @@ struct MetricPopover: View {
             Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
             TextField("Search processes", text: Binding(get: { search }, set: { search = $0 }))
                 .textFieldStyle(.plain)
+                .focusEffectDisabled()
+                .background(SearchFocusRingSuppressor().frame(width: 0, height: 0))
                 .accessibilityLabel("Search processes by name or PID")
             if !search.isEmpty {
                 Button { search = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .focusEffectDisabled()
                 .help("Clear search")
             }
         }
         .font(.system(size: 12))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 7)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+        .frame(height: 20)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var processList: some View {
@@ -214,15 +225,25 @@ struct MetricPopover: View {
                 .padding(.vertical, 2)
                 .background {
                     if #unavailable(macOS 15.0) {
-                        ProcessScrollObserver(scrolling: { isScrolling = $0 }, atTop: { isAtTop = $0 })
+                        ProcessScrollObserver(scrolling: { isScrolling = $0 }, atTop: { isAtTop = $0 }, atBottom: { isAtBottom = $0 })
                     }
                 }
             }
             .scrollIndicators(.automatic)
             .scrollTargetBehavior(.viewAligned)
             .frame(height: 262)
-            .trackProcessScrolling(changed: { isScrolling = $0 }, topChanged: { atTop in
-                if isAtTop != atTop { isAtTop = atTop }
+            .mask {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [isAtTop ? .white : .clear, .white], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 12)
+                    Rectangle().fill(.white)
+                    LinearGradient(colors: [.white, isAtBottom ? .white : .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 12)
+                }
+            }
+            .trackProcessScrolling(changed: { isScrolling = $0 }, edgesChanged: { edges in
+                if isAtTop != edges.atTop { isAtTop = edges.atTop }
+                if isAtBottom != edges.atBottom { isAtBottom = edges.atBottom }
             })
             .onChange(of: search) { _, _ in
                 proxy.scrollTo("process-list-top", anchor: .top)
@@ -362,15 +383,23 @@ struct MetricPopover: View {
 
 }
 
+private struct ProcessScrollEdges: Equatable {
+    let atTop: Bool
+    let atBottom: Bool
+}
+
 private extension View {
     @ViewBuilder
-    func trackProcessScrolling(changed: @escaping (Bool) -> Void, topChanged: @escaping (Bool) -> Void) -> some View {
+    func trackProcessScrolling(changed: @escaping (Bool) -> Void, edgesChanged: @escaping (ProcessScrollEdges) -> Void) -> some View {
         if #available(macOS 15.0, *) {
             self
                 .onScrollPhaseChange { _, phase in changed(phase != .idle) }
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentOffset.y + geometry.contentInsets.top <= 3
-                } action: { _, atTop in topChanged(atTop) }
+                .onScrollGeometryChange(for: ProcessScrollEdges.self) { geometry in
+                    ProcessScrollEdges(
+                        atTop: geometry.contentOffset.y + geometry.contentInsets.top <= 3,
+                        atBottom: geometry.visibleRect.maxY >= geometry.contentSize.height - 3
+                    )
+                } action: { _, edges in edgesChanged(edges) }
         } else {
             self
         }
@@ -381,11 +410,13 @@ private extension View {
 private struct ProcessScrollObserver: NSViewRepresentable {
     let scrolling: (Bool) -> Void
     let atTop: (Bool) -> Void
+    let atBottom: (Bool) -> Void
 
     func makeNSView(context: Context) -> ProcessScrollProbe { ProcessScrollProbe() }
     func updateNSView(_ view: ProcessScrollProbe, context: Context) {
         view.scrolling = scrolling
         view.atTop = atTop
+        view.atBottom = atBottom
         DispatchQueue.main.async { [weak view] in view?.connect() }
     }
     static func dismantleNSView(_ view: ProcessScrollProbe, coordinator: ()) { view.disconnect() }
@@ -394,9 +425,11 @@ private struct ProcessScrollObserver: NSViewRepresentable {
 private final class ProcessScrollProbe: NSView {
     var scrolling: (Bool) -> Void = { _ in }
     var atTop: (Bool) -> Void = { _ in }
+    var atBottom: (Bool) -> Void = { _ in }
     private weak var scroll: NSScrollView?
     private var observers: [NSObjectProtocol] = []
     private var lastTop: Bool?
+    private var lastBottom: Bool?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func viewDidMoveToWindow() {
@@ -405,7 +438,8 @@ private final class ProcessScrollProbe: NSView {
         else { DispatchQueue.main.async { [weak self] in self?.connect() } }
     }
     func connect() {
-        guard let enclosing = enclosingScrollView, scroll !== enclosing else { return }
+        guard let enclosing = enclosingScrollView else { return }
+        if scroll === enclosing { reportTop(); return }
         disconnect()
         scroll = enclosing
         let clip = enclosing.contentView
@@ -419,6 +453,16 @@ private final class ProcessScrollProbe: NSView {
         observers.append(NotificationCenter.default.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: enclosing, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.scrolling(false) }
         })
+        if let document = enclosing.documentView {
+            document.postsFrameChangedNotifications = true
+            document.postsBoundsChangedNotifications = true
+            observers.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: document, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reportTop() }
+            })
+            observers.append(NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: document, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reportTop() }
+            })
+        }
         reportTop()
     }
     func disconnect() {
@@ -426,11 +470,47 @@ private final class ProcessScrollProbe: NSView {
         observers.removeAll()
         scroll = nil
         lastTop = nil
+        lastBottom = nil
     }
     private func reportTop() {
         guard let scroll else { return }
         let value = scroll.contentView.bounds.minY <= 3
         if value != lastTop { lastTop = value; atTop(value) }
+        let documentHeight = scroll.documentView?.bounds.height ?? 0
+        let bottom = scroll.contentView.bounds.maxY >= documentHeight - 3
+        if bottom != lastBottom { lastBottom = bottom; atBottom(bottom) }
+    }
+}
+
+// SwiftUI's plain field can still inherit an AppKit focus ring. Suppress only
+// the decoration; keep the native field, keyboard focus, and accessibility.
+private struct SearchFocusRingSuppressor: NSViewRepresentable {
+    func makeNSView(context: Context) -> SearchFocusRingProbe { SearchFocusRingProbe() }
+    func updateNSView(_ view: SearchFocusRingProbe, context: Context) {
+        DispatchQueue.main.async { [weak view] in view?.removeFocusRing() }
+    }
+}
+
+private final class SearchFocusRingProbe: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in self?.removeFocusRing() }
+    }
+    func removeFocusRing() {
+        func findField(_ view: NSView) -> NSTextField? {
+            if let field = view as? NSTextField, field.isEditable { return field }
+            for child in view.subviews {
+                if let field = findField(child) { return field }
+            }
+            return nil
+        }
+        var ancestor = superview
+        while let view = ancestor {
+            if let field = findField(view) { field.focusRingType = .none; return }
+            if view === window?.contentView { break }
+            ancestor = view.superview
+        }
     }
 }
 

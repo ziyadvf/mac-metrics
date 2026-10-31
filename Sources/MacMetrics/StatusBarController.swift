@@ -128,6 +128,7 @@ final class StatusBarController: NSObject {
             button.target = self
             button.action = #selector(togglePopover(_:))
             button.tag = Metric.allCases.firstIndex(of: metric) ?? 0
+            button.focusRingType = .none
             button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
             button.toolTip = "\(metric.rawValue) usage"
             button.setAccessibilityHelp("Click to view \(metric.rawValue) details.")
