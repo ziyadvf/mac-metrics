@@ -100,7 +100,7 @@ struct MetricPopover: View {
                 Button(action: openSettings) {
                     HStack(spacing: 8) {
                         Image(systemName: "gearshape")
-                        Text("Settings…")
+                        Text("Settings")
                         Spacer()
                         Image(systemName: "chevron.right")
                             .font(.system(size: 10, weight: .medium))
