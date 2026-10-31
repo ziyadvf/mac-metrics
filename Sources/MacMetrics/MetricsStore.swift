@@ -17,6 +17,82 @@ final class MetricsStore: ObservableObject {
     @Published private(set) var activeMetric: Metric?
     @Published private(set) var terminationFailure: String?
 
+    @Published private(set) var selectedCPUDetail: (performance: Double, efficiency: Double)?
+    var selectedCPUPID: Int32? { didSet { cpuDetailBaseline = nil; selectedCPUDetail = nil; sampleSelectedCPU() } }
+    private var cpuDetailBaseline: (pid: Int32, start: UInt64, total: UInt64, performance: UInt64, time: Double)?
+    private var gpuBaseline: [UInt64: (pid: Int32, time: UInt64)] = [:]
+    @Published private(set) var gpuAttributionAvailable: Bool?
+    private var gpuSampleTime: Double?
+
+    private func sampleSelectedCPU() {
+        guard activeMetric == .cpu, let pid = selectedCPUPID else { return }
+        var usage = rusage_info_v6()
+        let result = withUnsafeMutablePointer(to: &usage) { pointer in
+            pointer.withMemoryRebound(to: UnsafeMutableRawPointer?.self, capacity: 1) {
+                proc_pid_rusage(pid, RUSAGE_INFO_V6, $0)
+            }
+        }
+        guard result == 0 else { selectedCPUDetail = nil; cpuDetailBaseline = nil; return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let total = usage.ri_user_time + usage.ri_system_time
+        let performance = usage.ri_user_ptime + usage.ri_system_ptime
+        defer { cpuDetailBaseline = (pid, usage.ri_proc_start_abstime, total, performance, now) }
+        guard let prior = cpuDetailBaseline, prior.pid == pid, prior.start == usage.ri_proc_start_abstime,
+              total >= prior.total, performance >= prior.performance else { return }
+        let scale = cpuNanosecondsPerTick * 100 / (max(0.001, now - prior.time) * 1_000_000_000 * Double(logicalCoreCount))
+        let delta = total - prior.total
+        let p = min(delta, performance - prior.performance)
+        selectedCPUDetail = (Double(p) * scale, Double(delta - p) * scale)
+    }
+
+    private func sampleGPUProcesses() {
+        var roots: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &roots) == KERN_SUCCESS else { return }
+        defer { IOObjectRelease(roots) }
+        var current: [UInt64: (pid: Int32, time: UInt64)] = [:]
+        var names: [Int32: String] = [:]
+        var root = IOIteratorNext(roots)
+        while root != 0 {
+            var children: io_iterator_t = 0
+            if IORegistryEntryCreateIterator(root, kIOServicePlane, IOOptionBits(kIORegistryIterateRecursively), &children) == KERN_SUCCESS {
+                var entry = IOIteratorNext(children)
+                while entry != 0 {
+                    if let creator = IORegistryEntryCreateCFProperty(entry, "IOUserClientCreator" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String,
+                       creator.hasPrefix("pid "),
+                       let comma = creator.firstIndex(of: ","),
+                       let pid = Int32(creator[creator.index(creator.startIndex, offsetBy: 4)..<comma]),
+                       let usage = IORegistryEntryCreateCFProperty(entry, "AppUsage" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [[String: Any]] {
+                        var id: UInt64 = 0
+                        if IORegistryEntryGetRegistryEntryID(entry, &id) == KERN_SUCCESS {
+                            let time = usage.reduce(UInt64(0)) { $0 + (($1["accumulatedGPUTime"] as? NSNumber)?.uint64Value ?? 0) }
+                            current[id] = (pid, time)
+                            names[pid] = creator[creator.index(after: comma)...].trimmingCharacters(in: .whitespaces)
+                        }
+                    }
+                    IOObjectRelease(entry)
+                    entry = IOIteratorNext(children)
+                }
+                IOObjectRelease(children)
+            }
+            IOObjectRelease(root)
+            root = IOIteratorNext(roots)
+        }
+        gpuAttributionAvailable = !current.isEmpty
+        let now = ProcessInfo.processInfo.systemUptime
+        defer { gpuBaseline = current; gpuSampleTime = now }
+        guard let priorTime = gpuSampleTime else { return }
+        var deltas: [Int32: UInt64] = [:]
+        for (id, sample) in current {
+            guard let prior = gpuBaseline[id], prior.pid == sample.pid, sample.time >= prior.time else { continue }
+            deltas[sample.pid, default: 0] += sample.time - prior.time
+        }
+        snapshot.processUsage[.gpu] = deltas.map { pid, delta in
+            let milliseconds = Double(delta) / 1_000_000 / max(0.001, now - priorTime)
+            return ProcessUsage(pid: pid, name: names[pid] ?? "Process", value: milliseconds,
+                                detail: String(format: "%.1f ms/s", milliseconds), icon: nil)
+        }.sorted { $0.value > $1.value }
+    }
+
     private let cpuNanosecondsPerTick: Double = {
         var timebase = mach_timebase_info_data_t()
         mach_timebase_info(&timebase)
@@ -74,6 +150,9 @@ final class MetricsStore: ObservableObject {
     func hide(_ metric: Metric) {
         guard activeMetric == metric else { return }
         activeMetric = nil
+        selectedCPUPID = nil
+        gpuBaseline.removeAll()
+        gpuSampleTime = nil
         scheduleRefreshTimer()
         idleCleanupTask?.cancel()
         idleCleanupTask = Task { [weak self] in
@@ -228,6 +307,8 @@ final class MetricsStore: ObservableObject {
         }
         snapshot.gpuPercent = readGPUUtilization()
         snapshot.updatedAt = Date()
+        sampleSelectedCPU()
+        if activeMetric == .gpu { sampleGPUProcesses() }
         if let activeMetric, activeMetric != .gpu { refreshProcesses(for: activeMetric) }
     }
 

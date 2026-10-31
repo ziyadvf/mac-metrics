@@ -73,16 +73,26 @@ struct MetricPopover: View {
             }
             .padding(.top, 2)
 
-            if metric == .gpu {
-                Text("Per-process GPU usage isn’t available in macOS.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 8)
-            } else {
-                processSearch
-                processList
+            if metric == .cpu, selectedProcess != nil {
+                HStack {
+                    Text("Selected process").foregroundStyle(.secondary)
+                    Spacer()
+                    if let detail = store.selectedCPUDetail {
+                        Text(String(format: "P %.1f%% · E %.1f%%", detail.performance, detail.efficiency))
+                            .monospacedDigit()
+                    } else {
+                        Text("Measuring…").foregroundStyle(.secondary)
+                    }
+                }
+                .font(.system(size: 11))
             }
+            if metric == .gpu {
+                Text("Experimental · GPU time, ms/s. Driver counters may overlap and aren’t total-GPU percentages.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            processSearch
+            processList
 
             }
             .padding(.horizontal, 16)
@@ -210,7 +220,11 @@ struct MetricPopover: View {
                 LazyVStack(spacing: 2) {
                     Color.clear.frame(height: 0).id("process-list-top")
                     if filteredProcesses.isEmpty {
-                        if search.isEmpty {
+                        if metric == .gpu && store.gpuAttributionAvailable == false {
+                            Text("GPU process counters are unavailable on this Mac.")
+                                .font(.system(size: 12)).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 120)
+                        } else if search.isEmpty {
                             ForEach(0..<5) { index in
                                 ProcessRow(
                                     process: ProcessUsage(pid: Int32(-index - 1), name: "Application name", value: 0, detail: metric == .cpu ? "0.0%" : "100.0 MB", icon: nil),
@@ -279,6 +293,7 @@ struct MetricPopover: View {
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: displayedProcesses.isEmpty)
             .onChange(of: selectedProcess) { _, pid in
+                if metric == .cpu { store.selectedCPUPID = pid }
                 guard let pid else { return }
                 updateProcesses(store.snapshot.processUsage[metric] ?? [])
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
