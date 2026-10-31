@@ -25,7 +25,7 @@ final class AppPreferences: ObservableObject {
         showsCPU = defaults.object(forKey: Keys.showsCPU) as? Bool ?? true
         showsGPU = defaults.object(forKey: Keys.showsGPU) as? Bool ?? true
         showsRAM = defaults.object(forKey: Keys.showsRAM) as? Bool ?? true
-        refreshInterval = defaults.object(forKey: Keys.refreshInterval) as? Double ?? 2
+        refreshInterval = max(3, defaults.object(forKey: Keys.refreshInterval) as? Double ?? 3)
         launchAtLoginStatus = SMAppService.mainApp.status
     }
 
@@ -71,14 +71,14 @@ final class SettingsWindowController {
             window = existing
         } else {
             let created = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 420, height: 310),
+                contentRect: NSRect(x: 0, y: 0, width: 440, height: 490),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false
             )
             created.title = "Settings"
             created.isReleasedWhenClosed = false
-            created.contentMinSize = NSSize(width: 420, height: 310)
+            created.contentMinSize = NSSize(width: 440, height: 490)
             created.contentViewController = NSHostingController(rootView: SettingsView(preferences: preferences))
             self.window = created
             window = created
@@ -98,49 +98,93 @@ private struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle("Open at login", isOn: launchAtLoginBinding)
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Mac Metrics").font(.system(size: 20, weight: .semibold))
+                    Text("A quiet view of your Mac.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            section("General") {
+                settingToggle("Open at login", isOn: launchAtLoginBinding)
                 if preferences.launchAtLoginStatus == .requiresApproval {
                     Text("Allow Mac Metrics in System Settings → General → Login Items.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let error = preferences.launchAtLoginError {
-                    Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
+                    Text(error).font(.footnote).foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Menu Bar")
-                    .font(.headline)
-                Toggle("CPU", isOn: $preferences.showsCPU)
-                Toggle("GPU", isOn: $preferences.showsGPU)
-                Toggle("RAM", isOn: $preferences.showsRAM)
+            section("Menu Bar") {
+                settingToggle("CPU", isOn: $preferences.showsCPU)
+                Divider()
+                settingToggle("GPU", isOn: $preferences.showsGPU)
+                Divider()
+                settingToggle("RAM", isOn: $preferences.showsRAM)
             }
 
-            Divider()
-
-            HStack {
-                Text("Refresh interval")
-                Spacer()
-                Picker("Refresh interval", selection: $preferences.refreshInterval) {
-                    Text("1 second").tag(1.0)
-                    Text("2 seconds").tag(2.0)
-                    Text("5 seconds").tag(5.0)
+            VStack(alignment: .leading, spacing: 8) {
+                section("Updates") {
+                    HStack {
+                        Text("Refresh interval")
+                        Spacer()
+                        Picker("Refresh interval", selection: $preferences.refreshInterval) {
+                            Text("3 seconds").tag(3.0)
+                            Text("5 seconds").tag(5.0)
+                            Text("10 seconds").tag(10.0)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .fixedSize()
+                    }
                 }
-                .labelsHidden()
-                .fixedSize()
+                Text("When panels are closed, updates run no faster than every 5 seconds. Process details load only while a panel is open.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
             }
         }
         .toggleStyle(.switch)
-        .padding(22)
-        .frame(width: 420, height: 310, alignment: .topLeading)
+        .controlSize(.small)
+        .padding(24)
+        .frame(width: 440, height: 490, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func settingToggle(_ title: String, isOn: Binding<Bool>) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Toggle(title, isOn: isOn).labelsHidden()
+        }
+        .frame(minHeight: 20)
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 2)
+            VStack(alignment: .leading, spacing: 10, content: content)
+                .font(.system(size: 13))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                }
+        }
     }
 }
