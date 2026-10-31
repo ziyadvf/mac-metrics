@@ -29,7 +29,7 @@ final class StatusBarController: NSObject {
                 store: store,
                 openSettings: { [weak self] in self?.showSettings() }
             ))
-            let panel = NSPanel(
+            let panel = MetricPanel(
                 contentRect: .zero,
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
@@ -214,7 +214,11 @@ final class StatusBarController: NSObject {
             panel.setContentSize(NSSize(width: 340, height: height))
             panelLayoutSignatures[metric] = layoutSignature(for: metric)
             position(panel, below: sender)
-            panel.orderFront(nil)
+            if metric == .gpu {
+                panel.orderFront(nil)
+            } else {
+                panel.makeKeyAndOrderFront(nil)
+            }
         }
     }
 
@@ -226,4 +230,9 @@ final class StatusBarController: NSObject {
         let y = max(anchor.minY - panel.frame.height - 4, screen.minY + 8)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
+}
+
+private final class MetricPanel: NSPanel {
+    // Borderless panels cannot receive keyboard focus unless explicitly allowed.
+    override var canBecomeKey: Bool { true }
 }
