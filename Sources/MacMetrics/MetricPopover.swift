@@ -100,7 +100,7 @@ struct MetricPopover: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 9)
+                .padding(.vertical, 6)
                 .background(Color.primary.opacity(settingsHovered ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -111,7 +111,7 @@ struct MetricPopover: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 15)
-        .padding(.bottom, 16)
+        .padding(.bottom, 10)
         .frame(width: 340, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .modifier(MenuBarGlassSurface())
@@ -240,7 +240,7 @@ struct MetricPopover: View {
                 }
                 .scrollTargetLayout()
                 .padding(.top, 2)
-                .padding(.bottom, 12)
+                .padding(.bottom, 6)
                 .background {
                     if #unavailable(macOS 15.0) {
                         ProcessScrollObserver(scrolling: { isScrolling = $0 }, atTop: { isAtTop = $0 }, atBottom: { isAtBottom = $0 })
@@ -249,14 +249,14 @@ struct MetricPopover: View {
             }
             .scrollIndicators(.automatic)
             .scrollTargetBehavior(.viewAligned)
-            .frame(height: 272)
+            .frame(height: 266)
             .mask {
                 VStack(spacing: 0) {
                     LinearGradient(colors: [isAtTop ? .white : .clear, .white], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 12)
+                        .frame(height: 8)
                     Rectangle().fill(.white)
                     LinearGradient(colors: [.white, isAtBottom ? .white : .clear], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 12)
+                        .frame(height: 8)
                 }
             }
             .trackProcessScrolling(changed: { isScrolling = $0 }, edgesChanged: { edges in
