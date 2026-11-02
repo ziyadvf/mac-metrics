@@ -487,17 +487,21 @@ private extension View {
 private struct OverlayScrollerConfiguration: NSViewRepresentable {
     func makeNSView(context: Context) -> Probe { Probe() }
     func updateNSView(_ view: Probe, context: Context) {
-        DispatchQueue.main.async { [weak view] in view?.configure() }
+        view.configure()
     }
     static func dismantleNSView(_ view: Probe, coordinator: ()) { view.disconnect() }
     final class Probe: NSView {
         private weak var clip: NSClipView?
         private var boundsObserver: NSObjectProtocol?
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToSuperview() {
+            super.viewDidMoveToSuperview()
+            configure()
+        }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             if window == nil { disconnect() }
-            else { DispatchQueue.main.async { [weak self] in self?.configure() } }
+            else { configure() }
         }
         func disconnect() {
             if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
@@ -511,9 +515,8 @@ private struct OverlayScrollerConfiguration: NSViewRepresentable {
             scroll.autohidesScrollers = true
             if changedStyle {
                 scroll.needsLayout = true
-                scroll.layoutSubtreeIfNeeded()
+                // Invalidate now; do not recursively lay out a hierarchy being attached.
                 window?.contentView?.needsLayout = true
-                window?.contentView?.layoutSubtreeIfNeeded()
             }
             if clip !== scroll.contentView {
                 disconnect()

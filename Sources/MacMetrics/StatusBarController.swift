@@ -331,6 +331,9 @@ final class StatusBarController: NSObject {
             panelLayoutSignatures[metric] = layoutSignature(for: metric)
             position(panel, below: sender)
             panel.makeKeyAndOrderFront(nil)
+            // Finish layout with the actual window geometry before its first display.
+            hostingController.view.needsLayout = true
+            hostingController.view.layoutSubtreeIfNeeded()
         }
     }
 
