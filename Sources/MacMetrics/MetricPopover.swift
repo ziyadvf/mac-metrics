@@ -277,6 +277,7 @@ struct MetricPopover: View {
             }
             .coordinateSpace(name: "process-viewport")
             .onPreferenceChange(SelectedRowFrameKey.self) { selectedRowFrame = $0 }
+            .contentMargins(.horizontal, 0, for: .scrollContent)
             .scrollIndicators(.automatic)
             .scrollTargetBehavior(.viewAligned)
             .frame(width: 340, height: 266)
@@ -488,16 +489,39 @@ private struct OverlayScrollerConfiguration: NSViewRepresentable {
     func updateNSView(_ view: Probe, context: Context) {
         DispatchQueue.main.async { [weak view] in view?.configure() }
     }
+    static func dismantleNSView(_ view: Probe, coordinator: ()) { view.disconnect() }
     final class Probe: NSView {
+        private weak var clip: NSClipView?
+        private var boundsObserver: NSObjectProtocol?
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            DispatchQueue.main.async { [weak self] in self?.configure() }
+            if window == nil { disconnect() }
+            else { DispatchQueue.main.async { [weak self] in self?.configure() } }
+        }
+        func disconnect() {
+            if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
+            boundsObserver = nil
+            clip = nil
         }
         func configure() {
             guard let scroll = enclosingScrollView else { return }
             if scroll.scrollerStyle != .overlay { scroll.scrollerStyle = .overlay }
             scroll.autohidesScrollers = true
+            if clip !== scroll.contentView {
+                disconnect()
+                clip = scroll.contentView
+                scroll.contentView.postsBoundsChangedNotifications = true
+                boundsObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.lockHorizontalPosition() }
+                }
+            }
+            lockHorizontalPosition()
+        }
+        private func lockHorizontalPosition() {
+            guard let clip, abs(clip.bounds.origin.x) > 0.01 else { return }
+            // ScrollViewReader's centered follow must never pan this vertical list sideways.
+            clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y))
         }
     }
 }
