@@ -79,11 +79,14 @@ struct MetricPopover: View {
             .padding(.top, 2)
 
             processSearch
-            processList
 
             }
+            .frame(width: 308, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 15)
+
+            processList
+                .padding(.top, 8)
 
             VStack(spacing: 0) {
                 Divider().padding(.horizontal, 16)
@@ -98,7 +101,7 @@ struct MetricPopover: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
-                    .frame(height: 32)
+                    .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
                     .contentShape(RoundedRectangle(cornerRadius: 6))
                     .background(Color.primary.opacity(settingsHovered ? 0.055 : 0), in: RoundedRectangle(cornerRadius: 6))
                 }
@@ -107,6 +110,7 @@ struct MetricPopover: View {
                 .onHover { settingsHovered = $0 }
                 .padding(8)
             }
+            .frame(width: 340)
         }
         .frame(width: 340, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
@@ -275,7 +279,7 @@ struct MetricPopover: View {
             .onPreferenceChange(SelectedRowFrameKey.self) { selectedRowFrame = $0 }
             .scrollIndicators(.automatic)
             .scrollTargetBehavior(.viewAligned)
-            .frame(height: 266)
+            .frame(width: 340, height: 266)
             .mask {
                 VStack(spacing: 0) {
                     LinearGradient(colors: [isAtTop ? .white : .clear, .white], startPoint: .top, endPoint: .bottom)
@@ -323,7 +327,7 @@ struct MetricPopover: View {
             }
             .transaction { if selectedProcess == nil && (isScrolling || !isAtTop) { $0.animation = nil } }
         }
-        .padding(.horizontal, -16)
+        .frame(width: 340)
     }
 
     private func updateProcesses(_ incoming: [ProcessUsage], animate: Bool = true) {
