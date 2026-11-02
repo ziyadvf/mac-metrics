@@ -506,8 +506,15 @@ private struct OverlayScrollerConfiguration: NSViewRepresentable {
         }
         func configure() {
             guard let scroll = enclosingScrollView else { return }
-            if scroll.scrollerStyle != .overlay { scroll.scrollerStyle = .overlay }
+            let changedStyle = scroll.scrollerStyle != .overlay
+            if changedStyle { scroll.scrollerStyle = .overlay }
             scroll.autohidesScrollers = true
+            if changedStyle {
+                scroll.needsLayout = true
+                scroll.layoutSubtreeIfNeeded()
+                window?.contentView?.needsLayout = true
+                window?.contentView?.layoutSubtreeIfNeeded()
+            }
             if clip !== scroll.contentView {
                 disconnect()
                 clip = scroll.contentView
